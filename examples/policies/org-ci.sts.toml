@@ -1,0 +1,9 @@
+# Place in the org's .github repository at .github/gsts/ci.sts.toml.
+# Root fields MUST precede table headers in TOML.
+repositories = ["infra", "api"]
+
+[google]
+project = "my-ci-project"
+
+[permissions]
+contents = "read"

@@ -1,0 +1,14 @@
+.git
+.github
+.terraform
+**/.terraform
+**/*.tfstate*
+**/*.tfvars
+**/*.tfvars.json
+**/*.pem
+**/*.key
+.env*
+gsts
+bin
+dist
+coverage.out

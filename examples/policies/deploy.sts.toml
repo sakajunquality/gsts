@@ -1,0 +1,7 @@
+# Place in the target repository at .github/gsts/deploy.sts.toml.
+[google]
+service_account = "deploy@my-project.iam.gserviceaccount.com"
+
+[permissions]
+contents = "read"
+pull_requests = "write"
