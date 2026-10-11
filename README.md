@@ -61,7 +61,7 @@ curl --fail-with-body --silent --show-error "$GSTS_URL/token" \
 {"token":"ghs_...","expires_at":"2026-09-25T10:00:00Z","permissions":{"contents":"read","metadata":"read","pull_requests":"write"}}
 ```
 
-`GSTS_AUDIENCE` must match the server's `GSTS_IDENTIFIER` (or the policy audience). It can differ from the endpoint URL. Do not log the response token.
+`GSTS_AUDIENCE` must match the server's `GSTS_IDENTIFIER` (or a policy audience explicitly listed in `GSTS_ALLOWED_AUDIENCES`). It can differ from the endpoint URL. Do not log the response token.
 
 ## Deploy
 
@@ -97,6 +97,12 @@ contents = "read"
 ```
 
 Omitting an org policy's `repositories` permits all repositories accessible to the installation. Prefer an explicit list. Only org-level policies can grant organization permissions such as `members`.
+
+## Shared client and policy tools
+
+Use the [official GitHub Action](action/README.md) as `sakajunquality/gsts/action@<commit SHA>` for OIDC exchange, token masking and post-job revocation. Pass the gsts URL/audience for the target environment. Apps, KMS keys and services remain isolated by environment.
+
+Use [`gsts policy validate/test`](docs/policy-cli.md) in CI to check policy syntax and allow/deny fixtures, including caller and reusable workflow references. For operational monitoring use [`/live` and `/ready`](docs/health.md); `/healthz` is no longer served. Configure [admission limits and diagnostics](docs/api.md#admission-and-retry-controls) before rollout.
 
 ## Local development
 

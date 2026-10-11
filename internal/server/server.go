@@ -3,8 +3,10 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -33,8 +35,8 @@ type GitHub interface {
 	Revoke(context.Context, string) error
 }
 type Server struct {
-	admission      admission
 	readiness      readinessState
+	admission      admission
 	Config         config.Config
 	Verifier       Verifier
 	Signer         AppSigner
@@ -57,7 +59,11 @@ func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		mux.ServeHTTP(w, r)
+		if r.URL.Path == "/token" {
+			s.observe(mux, w, r)
+		} else {
+			mux.ServeHTTP(w, r)
+		}
 	})
 }
 func write(w http.ResponseWriter, status int, value any) {
@@ -74,6 +80,9 @@ func (s *Server) upstream(w http.ResponseWriter, log *slog.Logger, err error) {
 	var e *github.APIError
 	if errors.As(err, &e) {
 		if e.RateLimited {
+			if e.RetryAfter != "" {
+				w.Header().Set("Retry-After", e.RetryAfter)
+			}
 			s.deny(w, log, 429, "rate_limited", err)
 			return
 		}
@@ -93,7 +102,7 @@ func (s *Server) revoke(token string) error {
 func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 	defer cancel()
-	log := s.Log
+	log := s.Log.With("request_id", w.Header().Get("X-Request-ID"))
 	release, retry := s.admission.acquire(s.Config, time.Now())
 	if release == nil {
 		w.Header().Set("Retry-After", strconv.Itoa(retry))
@@ -132,7 +141,9 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 		s.deny(w, log, 400, "invalid_request", errors.New("expected Bearer token"))
 		return
 	}
+	finish := stage(log, "verify_oidc")
 	claims, err := s.Verifier.Verify(ctx, auth[1])
+	finish(err)
 	if err != nil {
 		var providerErr *oidc.UpstreamError
 		switch {
@@ -152,12 +163,16 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 	}
 	email, _ := claims["email"].(string)
 	log = log.With("email", email, "subject", claims["sub"], "issuer", claims["iss"])
+	finish = stage(log, "sign_app_jwt")
 	appJWT, err := s.Signer.Token(ctx)
+	finish(err)
 	if err != nil {
 		s.upstream(w, log, err)
 		return
 	}
+	finish = stage(log, "find_installation")
 	id, err := s.GitHub.Installation(ctx, owner, appJWT)
+	finish(err)
 	if err != nil {
 		s.upstream(w, log, err)
 		return
@@ -166,15 +181,24 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 	if repo == "" {
 		policyRepo = s.Config.OrgPolicyRepo
 	}
+	finish = stage(log, "create_policy_token")
 	readToken, err := s.GitHub.CreateToken(ctx, id, appJWT, map[string]string{"contents": "read"}, []string{policyRepo})
+	finish(err)
 	if err != nil {
 		s.upstream(w, log, err)
 		return
 	}
-	data, fetchErr := s.GitHub.Policy(ctx, owner, policyRepo, s.Config.PolicyPrefix+"/"+req.Identity+s.Config.PolicyExtension, readToken.Token)
+	policyPath := s.Config.PolicyPrefix + "/" + req.Identity + s.Config.PolicyExtension
+	log = log.With("policy_repository", owner+"/"+policyRepo, "policy_path", policyPath)
+	finish = stage(log, "fetch_policy")
+	data, fetchErr := s.GitHub.Policy(ctx, owner, policyRepo, policyPath, readToken.Token)
+	finish(fetchErr)
 	// Revoke before minting the caller's token: cleanup failure cannot orphan a
 	// privileged token that was never delivered to its caller.
-	if err = s.revoke(readToken.Token); err != nil {
+	finish = stage(log, "revoke_policy_token")
+	err = s.revoke(readToken.Token)
+	finish(err)
+	if err != nil {
 		s.upstream(w, log, err)
 		return
 	}
@@ -182,12 +206,18 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 		s.upstream(w, log, fetchErr)
 		return
 	}
+	log = log.With("policy_sha256", fmt.Sprintf("%x", sha256.Sum256(data)))
+	finish = stage(log, "parse_policy")
 	p, err := policy.Parse(data, repo == "")
+	finish(err)
 	if err != nil {
 		s.deny(w, log, 403, "invalid_policy", err)
 		return
 	}
-	if err = p.Evaluate(claims, s.Config.Identifier); err != nil {
+	finish = stage(log, "evaluate_policy")
+	err = p.Evaluate(claims, s.Config.Identifier)
+	finish(err)
+	if err != nil {
 		s.deny(w, log, 403, "policy_mismatch", err)
 		return
 	}
@@ -205,7 +235,9 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	log.Info("exchange_authorized", "installation_id", id, "permissions", perms)
+	finish = stage(log, "create_caller_token")
 	token, err := s.GitHub.CreateToken(ctx, id, appJWT, perms, repos)
+	finish(err)
 	if err != nil {
 		s.upstream(w, log, err)
 		return

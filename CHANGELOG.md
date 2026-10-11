@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Separate process liveness (`/live`) from fresh App signing/authentication readiness (`/ready`); remove `/healthz`.
+- Reject unlisted audiences before KMS/GitHub and bound per-instance exchange concurrency/rate/burst.
+- Add a reusable Node24 GitHub Action with OIDC, masking and post-job token revocation.
+- Add offline `policy validate/test` commands and workflow-reference fixtures.
+- Propagate rate-limit retry delays and log request IDs, stage timings and policy content fingerprints.
+
 - Update Go to 1.26.9 and x/net to v0.60.0 with required transitive dependencies for the October security fixes.
 - Add prerelease/manual GHCR publication, digest-based promotion, and dual-platform version checks.
 
