@@ -2,11 +2,15 @@
 
 ## Unreleased
 
+## v0.2.0-alpha.1
+
+Prerelease for live acceptance testing of the v0.2 features. Not production-ready.
+
 - Add per-instance, in-memory ID-token replay prevention (`GSTS_REPLAY_PROTECTION`, `GSTS_REPLAY_MAX_ENTRIES`); reused tokens get 403 `token_replayed`. Tokens are keyed by decoded bytes, a full store returns 429 `overloaded`, and a token expiring before the check returns 401.
 - Add opt-in organization trusted-issuer allowlist (`GSTS_ORG_TRUST_FILE`, `gsts policy validate-trust`); issuers outside the org file get 403 `issuer_not_trusted`. An inaccessible org policy repository fails closed.
 - Add exact-match `claim` table to trust policies (strings, integers, booleans; strict types) for pinning immutable claims such as `repository_id`.
 - Document the `v0.1.0-alpha.2` live acceptance record (`docs/acceptance.md`) and the sts-cat migration guide (`docs/migration-sts-cat.md`); update status wording and reconcile SECURITY.md trust-boundary text with the current admission controls.
-- The v0.2 features above have not been live-tested.
+- The v0.2 features above have not been live-tested; this tag exists to run that acceptance.
 
 ## v0.1.0-alpha.2
 
