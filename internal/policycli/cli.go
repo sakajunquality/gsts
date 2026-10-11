@@ -26,9 +26,12 @@ type suite struct {
 // Run executes validate or test without reading server configuration or contacting services.
 func Run(args []string, out, errOut io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: gsts policy validate|test --policy FILE [--org] [--identifier AUDIENCE --fixtures FILE]")
+		return errors.New("usage: gsts policy validate|validate-trust|test --policy FILE [--org] [--identifier AUDIENCE --fixtures FILE]")
 	}
 	command := args[0]
+	if command == "validate-trust" {
+		return validateTrust(args[1:], out, errOut)
+	}
 	if command != "validate" && command != "test" {
 		return fmt.Errorf("unknown policy command %q", command)
 	}
@@ -160,5 +163,30 @@ func validClaims(c jwt.MapClaims) error {
 			}
 		}
 	}
+	return nil
+}
+
+// validateTrust checks an organization trusted-issuers file with the server's parser.
+func validateTrust(args []string, out, errOut io.Writer) error {
+	fs := flag.NewFlagSet("policy validate-trust", flag.ContinueOnError)
+	fs.SetOutput(errOut)
+	path := fs.String("file", "", "TOML trusted-issuers file")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if fs.NArg() != 0 || *path == "" {
+		return errors.New("--file is required; positional arguments are unsupported")
+	}
+	b, err := os.ReadFile(*path)
+	if err != nil {
+		return err
+	}
+	if _, err := policy.ParseTrust(b); err != nil {
+		return err
+	}
+	fmt.Fprintln(out, "Trust file valid (offline schema check).")
 	return nil
 }

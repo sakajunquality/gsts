@@ -98,3 +98,33 @@ func TestTrustedWorkflowExample(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
 }
+
+func TestValidateTrust(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "trusted.toml")
+	for _, tc := range []struct {
+		name, body string
+		wantErr    bool
+	}{
+		{"valid", "issuers = ['https://accounts.google.com']\n", false},
+		{"valid pattern", "issuer_patterns = ['https://token\\.actions\\.githubusercontent\\.com']\n", false},
+		{"empty list", "issuers = []\n", true},
+		{"unknown key", "issuers = ['a']\nextra = 1\n", true},
+		{"bad regex", "issuer_patterns = ['(']\n", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.WriteFile(f, []byte(tc.body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			err := Run([]string{"validate-trust", "--file", f}, &out, &out)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("error %v; output %s", err, out.String())
+			}
+		})
+	}
+	var out bytes.Buffer
+	if Run([]string{"validate-trust"}, &out, &out) == nil || Run([]string{"validate-trust", "--file", f, "extra"}, &out, &out) == nil || Run([]string{"validate-trust", "--file", filepath.Join(dir, "missing")}, &out, &out) == nil {
+		t.Fatal("accepted bad invocation")
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -25,6 +26,7 @@ import (
 type verifierStub struct {
 	err error
 	aud string
+	iss string
 }
 
 func (v verifierStub) Verify(context.Context, string) (jwt.MapClaims, error) {
@@ -32,7 +34,11 @@ func (v verifierStub) Verify(context.Context, string) (jwt.MapClaims, error) {
 	if aud == "" {
 		aud = "https://gsts.example.com"
 	}
-	return jwt.MapClaims{"iss": config.GoogleIssuer, "sub": "123", "email": "deploy@my-project.iam.gserviceaccount.com", "email_verified": true, "aud": aud, "exp": json.Number(strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10))}, v.err
+	iss := v.iss
+	if iss == "" {
+		iss = config.GoogleIssuer
+	}
+	return jwt.MapClaims{"iss": iss, "sub": "123", "email": "deploy@my-project.iam.gserviceaccount.com", "email_verified": true, "aud": aud, "exp": json.Number(strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10))}, v.err
 }
 
 type signerStub struct{ err error }
@@ -47,6 +53,11 @@ type githubStub struct {
 	perms                                         map[string]string
 	repos                                         []string
 	cleanupCanceled                               bool
+	trustSource                                   string
+	trustErr, readTokenErr                        error
+	trustPath                                     string
+	readRepos                                     []string
+	policyFetches                                 []string
 }
 
 func (g *githubStub) Installation(context.Context, string, string) (int64, error) {
@@ -56,8 +67,14 @@ func (g *githubStub) Installation(context.Context, string, string) (int64, error
 func (g *githubStub) CreateToken(_ context.Context, _ int64, _ string, p map[string]string, r []string) (github.Token, error) {
 	if len(g.events) == 1 {
 		g.events = append(g.events, "read-token")
-		if !reflect.DeepEqual(p, map[string]string{"contents": "read"}) || len(r) != 1 {
+		if !reflect.DeepEqual(p, map[string]string{"contents": "read"}) || len(r) < 1 || len(r) > 2 {
 			panic("unscoped read token")
+		}
+		g.readRepos = append([]string(nil), r...)
+		if g.readTokenErr != nil && len(r) == 2 {
+			g.events = g.events[:1]
+			g.readRepos = nil
+			return github.Token{}, g.readTokenErr
 		}
 		return github.Token{Token: "read-secret"}, nil
 	}
@@ -66,7 +83,12 @@ func (g *githubStub) CreateToken(_ context.Context, _ int64, _ string, p map[str
 	g.repos = r
 	return github.Token{Token: "caller-secret", ExpiresAt: time.Now().Add(time.Hour), Permissions: p}, g.mintErr
 }
-func (g *githubStub) Policy(context.Context, string, string, string, string) ([]byte, error) {
+func (g *githubStub) Policy(_ context.Context, owner, repo, path, _ string) ([]byte, error) {
+	g.policyFetches = append(g.policyFetches, owner+"/"+repo+"/"+path)
+	if g.trustPath != "" && path == g.trustPath {
+		g.events = append(g.events, "trust")
+		return []byte(g.trustSource), g.trustErr
+	}
 	g.events = append(g.events, "policy")
 	if g.cancel != nil {
 		g.cancel()
@@ -290,6 +312,141 @@ func TestReplayProtectionOff(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		if w := exchangeOnce(s, "same-id-token"); w.Code != 200 {
 			t.Fatal(i, w.Code, w.Body)
+		}
+	}
+}
+
+const trustPath = ".github/gsts/trusted-issuers.toml"
+
+func trustFixture(src string, err error) (*Server, *githubStub) {
+	s, g, _ := fixture()
+	s.Config.OrgTrustFile = trustPath
+	g.trustPath, g.trustSource, g.trustErr = trustPath, src, err
+	return s, g
+}
+func reasonOf(w *httptest.ResponseRecorder) string {
+	var res struct{ Reason string }
+	_ = json.Unmarshal(w.Body.Bytes(), &res)
+	return res.Reason
+}
+func TestOrgTrustDisabledAddsNoCalls(t *testing.T) {
+	s, g, _ := fixture()
+	if w := exchangeOnce(s, "t"); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	if !reflect.DeepEqual(g.policyFetches, []string{"org/repo/.github/gsts/deploy.sts.toml"}) || !reflect.DeepEqual(g.readRepos, []string{"repo"}) {
+		t.Fatal(g.policyFetches, g.readRepos)
+	}
+	if !reflect.DeepEqual(g.events, []string{"installation", "read-token", "policy", "revoke:read-secret", "caller-token"}) {
+		t.Fatal(g.events)
+	}
+}
+func TestOrgTrustAbsentAllows(t *testing.T) {
+	s, g := trustFixture("", &github.APIError{Status: 404})
+	if w := exchangeOnce(s, "t"); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	if !reflect.DeepEqual(g.events, []string{"installation", "read-token", "trust", "policy", "revoke:read-secret", "caller-token"}) {
+		t.Fatal(g.events)
+	}
+}
+func TestOrgTrustReadTokenCoversBothRepositories(t *testing.T) {
+	s, g := trustFixture(`issuers = ["https://accounts.google.com"]`, nil)
+	w := exchangeOnce(s, "t")
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	if !reflect.DeepEqual(g.readRepos, []string{"repo", ".github"}) {
+		t.Fatal(g.readRepos)
+	}
+	if !reflect.DeepEqual(g.policyFetches, []string{"org/.github/" + trustPath, "org/repo/.github/gsts/deploy.sts.toml"}) {
+		t.Fatal(g.policyFetches)
+	}
+}
+func TestOrgTrustOrgScopeDoesNotDuplicateRepository(t *testing.T) {
+	s, g := trustFixture(`issuers = ["https://accounts.google.com"]`, nil)
+	g.source = "[google]\nservice_account=\"deploy@my-project.iam.gserviceaccount.com\"\n[permissions]\nmembers=\"read\"\n"
+	r := httptest.NewRequest("POST", "/token", strings.NewReader(`{"scope":"org","identity":"deploy"}`))
+	r.Header.Set("Authorization", "Bearer t")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != 200 || !reflect.DeepEqual(g.readRepos, []string{".github"}) {
+		t.Fatal(w.Code, w.Body, g.readRepos)
+	}
+}
+func TestOrgTrustFallsBackWhenOrgPolicyRepoInaccessible(t *testing.T) {
+	for _, status := range []int{404, 422} {
+		s, g := trustFixture(`issuers = ["https://token.actions.githubusercontent.com"]`, nil)
+		g.readTokenErr = &github.APIError{Status: status}
+		if w := exchangeOnce(s, "t"); w.Code != 200 {
+			t.Fatal(status, w.Code, w.Body)
+		}
+		if !reflect.DeepEqual(g.readRepos, []string{"repo"}) || !reflect.DeepEqual(g.policyFetches, []string{"org/repo/.github/gsts/deploy.sts.toml"}) {
+			t.Fatal(g.readRepos, g.policyFetches)
+		}
+	}
+}
+func TestOrgTrustDecisions(t *testing.T) {
+	actions := verifierStub{iss: config.ActionsIssuer}
+	tests := []struct {
+		name, src string
+		verifier  Verifier
+		err       error
+		status    int
+		reason    string
+	}{
+		{"only google, actions token", `issuers = ["https://accounts.google.com"]`, actions, nil, 403, "issuer_not_trusted"},
+		{"lists actions issuer", `issuers = ["https://token.actions.githubusercontent.com"]`, actions, nil, 200, ""},
+		{"pattern matches", `issuer_patterns = ['https://token\.actions\.githubusercontent\.com']`, actions, nil, 200, ""},
+		{"pattern is anchored", `issuer_patterns = ['https://token\.actions']`, actions, nil, 403, "issuer_not_trusted"},
+		{"invalid TOML", `issuers = [`, nil, nil, 403, "invalid_policy"},
+		{"no lists", `issuers = []`, nil, nil, 403, "invalid_policy"},
+		{"unknown key", "issuers = [\"https://accounts.google.com\"]\nextra = 1", nil, nil, 403, "invalid_policy"},
+		{"empty file", ``, nil, nil, 403, "invalid_policy"},
+		{"fetch 500", ``, nil, &github.APIError{Status: 500}, 502, "upstream_error"},
+		{"fetch error", ``, nil, errors.New("boom"), 502, "upstream_error"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s, g := trustFixture(tc.src, tc.err)
+			if tc.verifier != nil {
+				s.Verifier = tc.verifier
+				g.source = "issuer=\"https://token.actions.githubusercontent.com\"\nsubject=\"123\"\n[permissions]\ncontents=\"read\"\n"
+			}
+			w := exchangeOnce(s, "t")
+			if w.Code != tc.status || reasonOf(w) != tc.reason {
+				t.Fatal(w.Code, w.Body)
+			}
+			minted := slices.Contains(g.events, "caller-token")
+			if minted != (tc.status == 200) {
+				t.Fatal("caller token mismatch", g.events)
+			}
+			// The read token is always revoked before anything else is decided.
+			if !slices.Contains(g.events, "revoke:read-secret") {
+				t.Fatal("read token not revoked", g.events)
+			}
+			if tc.err != nil && slices.Contains(g.events, "policy") {
+				t.Fatal("identity policy fetched after trust failure", g.events)
+			}
+		})
+	}
+}
+func TestOrgTrustRevokeFailureStillFailsClosed(t *testing.T) {
+	s, g := trustFixture(`issuers = ["https://accounts.google.com"]`, nil)
+	g.revokeErr = errors.New("revoke")
+	w := exchangeOnce(s, "t")
+	if w.Code != 502 || slices.Contains(g.events, "caller-token") {
+		t.Fatal(w.Code, g.events)
+	}
+}
+func TestOrgTrustLogsFingerprint(t *testing.T) {
+	s, _ := trustFixture(`issuers = ["https://accounts.google.com"]`, nil)
+	logs := new(bytes.Buffer)
+	s.Log = slog.New(slog.NewJSONHandler(logs, nil))
+	exchangeOnce(s, "t")
+	for _, want := range []string{"org_trust_sha256", `"org_trust_repository":"org/.github"`, trustPath} {
+		if !strings.Contains(logs.String(), want) {
+			t.Fatal("missing", want)
 		}
 	}
 }

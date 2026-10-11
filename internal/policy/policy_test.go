@@ -152,6 +152,12 @@ func TestExamples(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if strings.HasSuffix(path, "trusted-issuers.toml") {
+			if _, err = ParseTrust(b); err != nil {
+				t.Fatalf("%s: %v", path, err)
+			}
+			continue
+		}
 		if _, err = Parse(b, strings.Contains(path, "org-")); err != nil {
 			t.Fatalf("%s: %v", path, err)
 		}

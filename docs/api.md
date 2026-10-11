@@ -45,7 +45,8 @@ Clients should branch on `reason`, not the human-readable `error`. Claim mismatc
 | 403 | `token_replayed` | This ID token was already exchanged on this instance and has not expired; rejected before KMS/GitHub |
 | 403 | `scope_not_allowed` | Org allowlist rejection |
 | 403 | `policy_mismatch` | Audience/identity/claim mismatch or excessive requested scope |
-| 403 | `invalid_policy` | Invalid TOML, missing constraints, or invalid permission scope |
+| 403 | `invalid_policy` | Invalid TOML, missing constraints, or invalid permission scope; also an invalid [organization trust file](policies.md#organization-trusted-issuers) |
+| 403 | `issuer_not_trusted` | `GSTS_ORG_TRUST_FILE` is enabled and the organization's trust file does not allow the token's issuer |
 | 404 | `not_found` | Installation or policy lookup returned 404 |
 | 429 | `overloaded` | Local concurrency or request-rate limit |
 | 429 | `rate_limited` | GitHub primary or secondary rate limit |

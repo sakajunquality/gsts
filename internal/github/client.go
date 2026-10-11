@@ -28,6 +28,12 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("GitHub API HTTP %d (rate_limited=%t)", e.Status, e.RateLimited)
 }
 
+// IsNotFound reports whether err is a GitHub HTTP 404.
+func IsNotFound(err error) bool {
+	var e *APIError
+	return errors.As(err, &e) && e.Status == 404
+}
+
 type Installation struct {
 	ID      int64 `json:"id"`
 	Account struct {

@@ -1,0 +1,7 @@
+# Place in the org's policy repository (default: .github) at the path set in
+# GSTS_ORG_TRUST_FILE, e.g. .github/gsts/trusted-issuers.toml.
+# Enforce-only: this can narrow the deployment's GSTS_ALLOWED_ISSUERS, never widen it.
+# At least one of the two lists must be nonempty.
+issuers = ["https://accounts.google.com"]
+# Patterns are RE2, wrapped in ^(?:...)$. Anchor exact hosts; escape dots.
+issuer_patterns = ['https://token\.actions\.githubusercontent\.com']

@@ -79,6 +79,7 @@ The import command uses Application Default Credentials, prints the enabled key 
 ## Policies and API
 
 - [Trust policies](docs/policies.md): Google shorthand, org policies, audiences, claim matching, and narrowing.
+- [Organization trusted issuers](docs/policies.md#organization-trusted-issuers): opt-in org-level issuer allowlist (`GSTS_ORG_TRUST_FILE`).
 - [HTTP API](docs/api.md): request/response formats and stable error reasons.
 - [Configuration](docs/configuration.md): all environment variables.
 - [Design decisions](docs/design.md): compatibility boundaries and adjustments to the initial proposal.

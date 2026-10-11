@@ -9,6 +9,12 @@ gsts policy validate --policy examples/policies/org-ci.sts.toml --org
 
 The default scope is repository. Supply `--org` for an organization policy; this affects permission and repository-list validation.
 
+`gsts policy validate-trust --file FILE` checks an [organization trusted-issuers file](policies.md#organization-trusted-issuers) with the server's parser (unknown keys, empty lists and invalid patterns are errors). It takes `--file` rather than `--policy` because it is not an identity policy; `--org`, `--identifier` and `--fixtures` do not apply.
+
+```sh
+gsts policy validate-trust --file examples/policies/trusted-issuers.toml
+```
+
 `gsts policy test` runs an expected allow/deny suite against the server's policy evaluator:
 
 ```sh
