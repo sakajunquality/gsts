@@ -1,0 +1,31 @@
+{
+  "cases": [
+    {
+      "name": "main branch accepted",
+      "expect": "allow",
+      "claims": {
+        "iss": "https://token.actions.githubusercontent.com",
+        "sub": "repo:example-org/infra:ref:refs/heads/main",
+        "aud": "https://gsts.example.com"
+      }
+    },
+    {
+      "name": "feature branch denied",
+      "expect": "deny",
+      "claims": {
+        "iss": "https://token.actions.githubusercontent.com",
+        "sub": "repo:example-org/infra:ref:refs/heads/feature",
+        "aud": "https://gsts.example.com"
+      }
+    },
+    {
+      "name": "different audience denied",
+      "expect": "deny",
+      "claims": {
+        "iss": "https://token.actions.githubusercontent.com",
+        "sub": "repo:example-org/infra:ref:refs/heads/main",
+        "aud": "https://other.example.com"
+      }
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+# Pin both the caller workflow and the reusable workflow that runs the job.
+issuer = "https://token.actions.githubusercontent.com"
+subject = "repo:example-org/infra:ref:refs/heads/main"
+
+[claim_pattern]
+workflow_ref = 'example-org/infra/\.github/workflows/deploy\.yml@refs/heads/main'
+job_workflow_ref = 'example-org/automation/\.github/workflows/deploy\.yml@refs/tags/v1'
+
+[permissions]
+contents = "read"
