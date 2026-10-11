@@ -17,6 +17,9 @@ type responseStatus struct {
 	wroteHeader bool
 }
 
+// Unwrap lets http.ResponseController reach the underlying writer's Flush.
+func (w *responseStatus) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 func (w *responseStatus) WriteHeader(code int) {
 	if w.wroteHeader {
 		return

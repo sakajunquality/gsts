@@ -2,6 +2,8 @@ package github
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -115,5 +117,55 @@ func TestRetryAfterBounds(t *testing.T) {
 	}
 	if got := retryAfter(http.Header{"X-Ratelimit-Remaining": {"0"}, "X-Ratelimit-Reset": {"999"}}, true, now); got != "1" {
 		t.Fatal(got)
+	}
+}
+
+func TestHeadAndPolicyRef(t *testing.T) {
+	sha := strings.Repeat("0123456789abcdef", 3)[:40]
+	var uris []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		uris = append(uris, r.URL.EscapedPath()+"?"+r.URL.RawQuery)
+		if r.Header.Get("Authorization") != "Bearer read-secret" {
+			t.Error("missing token")
+		}
+		if strings.HasSuffix(r.URL.Path, "/commits") {
+			switch r.URL.Path {
+			case "/repos/org/bad/commits":
+				_, _ = w.Write([]byte(`[{"sha":"ABCDEF"}]`))
+			case "/repos/org/upper/commits":
+				_, _ = w.Write([]byte(`[{"sha":"` + strings.ToUpper(sha) + `"}]`))
+			case "/repos/org/missing/commits":
+				w.WriteHeader(404)
+			case "/repos/org/redirect/commits":
+				http.Redirect(w, r, "/elsewhere", 302)
+			default:
+				_, _ = w.Write([]byte(`[{"sha":"` + sha + `"}]`))
+			}
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"type": "file", "encoding": "base64", "size": 2, "content": base64.StdEncoding.EncodeToString([]byte("ok"))})
+	}))
+	defer srv.Close()
+	c := New(srv.URL)
+	got, err := c.Head(context.Background(), "org", "repo", "read-secret")
+	if err != nil || got != sha {
+		t.Fatal(got, err)
+	}
+	for _, repo := range []string{"bad", "upper", "redirect"} {
+		if _, err := c.Head(context.Background(), "org", repo, "read-secret"); err == nil {
+			t.Fatal("accepted", repo)
+		}
+	}
+	if _, err := c.Head(context.Background(), "org", "missing", "read-secret"); !IsNotFound(err) {
+		t.Fatal(err)
+	}
+	if b, err := c.Policy(context.Background(), "org", "repo", ".github/gsts/a.toml", sha, "read-secret"); err != nil || string(b) != "ok" {
+		t.Fatal(b, err)
+	}
+	if _, err := c.Policy(context.Background(), "org", "repo", "p.toml", "a&b=c d", "read-secret"); err != nil {
+		t.Fatal(err)
+	}
+	if uris[0] != "/repos/org/repo/commits?per_page=1" || uris[len(uris)-2] != "/repos/org/repo/contents/.github/gsts/a.toml?ref="+sha || uris[len(uris)-1] != "/repos/org/repo/contents/p.toml?ref=a%26b%3Dc+d" {
+		t.Fatal(uris)
 	}
 }

@@ -27,7 +27,7 @@ The successful response is HTTP 200, with `Cache-Control: no-store`:
 {"token":"ghs_...","expires_at":"2026-09-25T10:00:00Z","permissions":{"contents":"read","metadata":"read"}}
 ```
 
-`expires_at` and effective `permissions` come from GitHub. GitHub may include implicit `metadata:read`. Installation tokens expire on GitHub's schedule; gsts does not issue refresh tokens or extend token lifetime. A caller owns its returned token and can revoke it via GitHub when finished.
+`expires_at` and effective `permissions` come from GitHub. GitHub may include implicit `metadata:read`. Installation tokens expire on GitHub's schedule; gsts does not issue refresh tokens or extend token lifetime. If gsts cannot deliver the response (the client disconnected before the response was written, or the write or flush fails), it attempts to revoke the token it minted and logs `caller_token_revoked_undelivered`. A caller owns its returned token and can revoke it via GitHub when finished.
 
 ## Errors
 
@@ -70,4 +70,4 @@ Exchange attempts (including invalid credentials) share a per-instance token buc
 
 GitHub rate-limit responses include normalized `Retry-After` when available. Otherwise primary-limit reset time is converted to seconds, with 60 seconds as the fallback. gsts never automatically retries exchange or token creation. Clients should respect `Retry-After`, use bounded attempts and jitter, and account for ambiguous failures that may already have minted a token.
 
-Every `/token` response has a generated `X-Request-ID` for log correlation; inbound request IDs are not trusted. Logs include per-stage `duration_ms`, safe GitHub request IDs on failures, and the applied policy's repository, path and SHA-256 of fetched bytes. The hash identifies the exact policy contents, not a Git commit or proof of branch protection. Tokens and upstream bodies are never diagnostic fields.
+Every `/token` response has a generated `X-Request-ID` for log correlation; inbound request IDs are not trusted. Logs include per-stage `duration_ms`, safe GitHub request IDs on failures, and the applied policy's repository, path, pinned commit (`policy_commit`, plus `org_trust_commit` when the organization trust file is read) and SHA-256 of fetched bytes. The commit identifies the revision the files were read from; the SHA-256 identifies the exact contents. Neither is proof of branch protection. Tokens and upstream bodies are never diagnostic fields.

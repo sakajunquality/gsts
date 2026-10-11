@@ -1,6 +1,6 @@
 # Trust policies
 
-Policies are read from the repository's default branch on every exchange. No policy cache or caller-selected ref is used. A repo scope reads `.github/gsts/<identity>.sts.toml` in that repo. An org scope reads the same path in its `.github` repository (configurable). That repository must be accessible to the GitHub App.
+Policies are read from the repository's default branch on every exchange. Each exchange resolves the default branch's head commit at its start and pins every read in that repository to it, so files in one repository (for example an org's trust file and org-scope policy) are always read from one revision. Repositories are pinned independently (a repository-scope policy and the org trust file may come from different repositories and commits). No policy cache or caller-selected ref is used. A repo scope reads `.github/gsts/<identity>.sts.toml` in that repo. An org scope reads the same path in its `.github` repository (configurable). That repository must be accessible to the GitHub App.
 
 ## Schema
 
