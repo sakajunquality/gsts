@@ -10,6 +10,7 @@ Policies are read from the repository's default branch on every exchange. No pol
 | `subject` / `subject_pattern` | Exact `sub` / anchored regex. At least one required unless `[google]` is present. |
 | `audience` / `audience_pattern` | Match an audience in `GSTS_ALLOWED_AUDIENCES`; defaults to `GSTS_IDENTIFIER` |
 | `claim_pattern` | Map of claim names to regexes. All must match. String, boolean, and numeric scalar claims are supported. |
+| `claim` | Table of claim names to exact values (strings, integers or booleans). Every entry must match; the claim must exist and be a scalar of the same type. See [Exact claims](#exact-claims). |
 | `max_token_lifetime` | Positive upper limit in seconds for `exp - iat`; 0/omission means no extra limit |
 | `[permissions]` | Nonempty permission map, values `read` or `write` |
 | `repositories` | Root field, org-only list of repositories; omission permits all installed repositories |
@@ -60,7 +61,45 @@ claim_pattern = { repository_owner = "example-org" }
 contents = "read"
 ```
 
-The workflow needs `id-token: write` to request an OIDC token with gsts's audience. Environment-based subjects have a different format; match the subject actually issued for the workflow. Use additional claims such as repository ID where appropriate to avoid name-reuse ambiguity.
+The workflow needs `id-token: write` to request an OIDC token with gsts's audience. Environment-based subjects have a different format; match the subject actually issued for the workflow. Use `claim` with `repository_id` and `repository_owner_id` (see [Exact claims](#exact-claims)) to avoid name-reuse ambiguity.
+
+## Exact claims
+
+`claim` pins claims by exact value, avoiding escaped regexes. Every entry is ANDed with all other constraints, and a key may appear in both `claim` and `claim_pattern`; both must hold. Matching is strict and never coerces types:
+
+| Policy value | Matching claim |
+| --- | --- |
+| string | string, byte-equal |
+| integer | JSON number that is an integer and equals the value (`123.5` and `123.0` do not match) |
+| boolean | boolean, equal |
+
+Anything else is a mismatch: a different type (a string claim never matches an integer value and vice versa), an array or object claim, or a missing claim. Floats, arrays, tables and datetimes in `claim` are rejected at parse time, as are an empty table and an empty claim name. Denial messages do not include claim values.
+
+**GitHub Actions claim types:** Actions emits `repository_id` and `repository_owner_id` as JSON strings, so write `repository_id = "123"`, not `123`. An integer there would never match. Check the type of the claim you pin against a real token.
+
+```toml
+# GitHub Actions: pin immutable IDs (note: strings)
+issuer = "https://token.actions.githubusercontent.com"
+subject = "repo:example-org/infra:ref:refs/heads/main"
+claim = { repository_id = "123456789", repository_owner_id = "987654321" }
+
+[permissions]
+contents = "read"
+```
+
+```toml
+# Google: pin the authorized party
+subject = "112233445566778899000"
+claim = { azp = "112233445566778899000" }
+
+[google]
+service_account = "deploy@my-project.iam.gserviceaccount.com"
+
+[permissions]
+contents = "read"
+```
+
+For a service account identity token obtained from the metadata server, `azp` is typically the service account's unique numeric ID, the same value as `sub`. Verify this against a real token before relying on it; a wrong value denies every exchange.
 
 ## Organization scope
 

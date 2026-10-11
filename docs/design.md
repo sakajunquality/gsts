@@ -21,6 +21,7 @@ The `POST /token` request shape and base TOML names follow [sts-cat](https://git
 - Regexes use Go RE2 rather than Rust regex syntax.
 - Lifetime limits use required `iat` (`exp - iat`), not `nbf` fallback.
 - Unknown policy keys are rejected.
+- The exact-match `claim` table is a gsts extension not present in sts-cat; policies using it are not portable back.
 - Built-in issuer support is intentionally limited.
 - Empty repository lists and empty permission maps are denied.
 - Repository policies cannot grant organization permissions.
