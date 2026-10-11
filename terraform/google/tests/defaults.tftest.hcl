@@ -21,6 +21,10 @@ run "default_bootstrap" {
     error_message = "Bootstrap must create an empty import-only key."
   }
   assert {
+    condition     = google_cloud_run_v2_service.gsts.template[0].containers[0].startup_probe[0].http_get[0].path == "/live"
+    error_message = "Bootstrap must use process liveness, independent of KMS readiness."
+  }
+  assert {
     condition     = google_kms_crypto_key_iam_member.signer.role == "roles/cloudkms.signerVerifier"
     error_message = "The runtime must have signing permissions only."
   }

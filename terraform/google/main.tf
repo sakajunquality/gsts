@@ -71,10 +71,11 @@ resource "google_cloud_run_v2_service" "gsts" {
           value = env.value
         }
       }
-      # TCP bootstrap intentionally permits an empty import-only KMS key.
-      # Do not wire /healthz into startup/liveness: it reports dependency readiness.
+      # Process liveness permits bootstrap with an empty import-only KMS key.
+      # Dependency readiness is checked separately through /ready.
       startup_probe {
-        tcp_socket {
+        http_get {
+          path = "/live"
           port = 8080
         }
         period_seconds    = 2

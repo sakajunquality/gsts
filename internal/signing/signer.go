@@ -99,6 +99,19 @@ func (a *AppJWT) Token(ctx context.Context) (string, error) {
 	if a.token != "" && now.Before(a.refresh) {
 		return a.token, nil
 	}
+	token, err := a.FreshToken(ctx)
+	if err != nil {
+		return "", err
+	}
+	a.token = token
+	a.refresh = now.Add(8 * time.Minute)
+	return token, nil
+}
+
+// FreshToken signs a new JWT without reading or changing the exchange cache.
+// Readiness uses this to exercise the signer even when Token has a cached JWT.
+func (a *AppJWT) FreshToken(ctx context.Context) (string, error) {
+	now := time.Now()
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
 	// Backdate iat by 60s; exp stays at most ten minutes ahead of wall time.
 	body, err := json.Marshal(map[string]any{"iss": a.AppID, "iat": now.Add(-time.Minute).Unix(), "exp": now.Add(9 * time.Minute).Unix()})
@@ -111,7 +124,5 @@ func (a *AppJWT) Token(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	a.token = unsigned + "." + base64.RawURLEncoding.EncodeToString(sig)
-	a.refresh = now.Add(8 * time.Minute)
-	return a.token, nil
+	return unsigned + "." + base64.RawURLEncoding.EncodeToString(sig), nil
 }

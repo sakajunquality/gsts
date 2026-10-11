@@ -1,0 +1,9 @@
+# Health probes
+
+`GET /live` returns HTTP 200 and `{"ok":true}` when the HTTP process is serving. It does not contact KMS or GitHub. Cloud Run's startup probe uses this endpoint, allowing the service to bootstrap before a private key is imported. Dependency outages do not require restarting the process.
+
+`GET /ready` returns HTTP 200 and `{"ok":true}` when a newly signed GitHub App JWT succeeds at authenticated GitHub `GET /app`. It returns HTTP 503 and `{"ok":false}` on signing failure, GitHub rejection or unavailability, or canceled waiting. Signing always bypasses the eight-minute exchange JWT cache. A locally valid key which does not belong to the configured GitHub App fails this check. Probe responses never include credentials or upstream error details.
+
+Readiness is an observation with bounded staleness: each completed result, successful or failed, is cached for **10 seconds** per process. The first request after expiry starts one fresh check; concurrent requests share that check. It has a **5-second** timeout shared by signing and GitHub. A canceled caller stops waiting, while the bounded shared check continues for other callers. Thus a dependency change can be hidden for at most the remaining 10-second cache interval, followed by the fresh check's runtime (up to 5 seconds). Failed results are also cached to bound public probe traffic against KMS and GitHub. Fresh readiness signing does not update or invalidate the exchange JWT cache.
+
+Use `/ready` for external dependency monitoring and rollout validation. `/live` is suitable for process startup and liveness checks. There is no `/healthz` alias. [Google recommends avoiding paths ending in `z`](https://docs.cloud.google.com/run/docs/known-issues#reserved-url-paths) on Cloud Run; this is not a guarantee that `/healthz` is reserved. Successful readiness validates App authentication, not OIDC providers, installation access, trust policy contents, or every token exchange permission.

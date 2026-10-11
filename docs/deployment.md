@@ -77,10 +77,10 @@ terraform init
 terraform apply
 export GSTS_URL=$(terraform output -raw service_url)
 export GSTS_KEY=$(terraform output -raw kms_key)
-curl --silent --show-error -i "$GSTS_URL/healthz"
+curl --silent --show-error -i "$GSTS_URL/ready"
 ```
 
-At this point `/healthz` returns 503 because the key has no version. The server listens and its TCP startup probe passes, so the initial deployment can succeed. Do not use `/healthz` as a startup/liveness probe for this bootstrap flow.
+At this point `/ready` returns 503 because the key has no version. The server listens and its `/live` startup probe passes, so the initial deployment can succeed. Do not use `/ready` as a startup/liveness probe for this bootstrap flow.
 
 The module grants `allUsers` `roles/run.invoker` by default. gsts performs OIDC authorization itself. If organization policy prohibits that binding, read the IAM section below before applying.
 
@@ -96,10 +96,10 @@ The command creates an import job in the same key ring, waits for it to become a
 
 Compare the printed version with `terraform output -raw kms_key_version`. If it differs (for example, a previous failed import consumed a version number), set `kms_key_version_number` in the module to the printed version number and apply again. **Do not blindly repeat an import after a timeout:** inspect the job/key versions first; the first request may have succeeded.
 
-If the imported version is the configured version, `/healthz` recovers without redeployment because signing failures are not cached. Check:
+If the imported version is the configured version, `/ready` recovers without redeployment after the readiness cache expires (up to 10 seconds plus check time). Check:
 
 ```sh
-curl --fail --silent --show-error "$GSTS_URL/healthz"
+curl --fail --silent --show-error "$GSTS_URL/ready"
 ```
 
 Remove the original PEM and any copies after confirming successful import and an exchange. The command never deletes user files automatically. Filesystem deletion does not promise secure erasure on SSDs, snapshots, or backups. Keep this limitation in mind when selecting the import workstation.
