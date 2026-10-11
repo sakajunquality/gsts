@@ -21,6 +21,13 @@ jobs:
       - run: go vet ./...
       - run: go test -race ./...
       - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: 1.15.2
+      - run: terraform fmt -check -recursive terraform
+      - run: terraform -chdir=terraform/google init -backend=false
+      - run: terraform -chdir=terraform/google validate
+      - run: terraform -chdir=terraform/google test
   publish:
     needs: validate
     runs-on: ubuntu-latest

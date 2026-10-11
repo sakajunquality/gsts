@@ -27,4 +27,4 @@ Production configuration uses KMS only. `file` and `env` are explicitly gated by
 
 ## Before a public release
 
-Enable private vulnerability reporting, complete live Cloud Run / KMS / GitHub acceptance, review dependencies and container provenance, verify package visibility, and arrange a security review of the authorization and cleanup paths. The CI workflow never requires production credentials.
+Enable private vulnerability reporting, complete the live acceptance runbook, review dependencies and container provenance, verify package visibility, and arrange a security review of the authorization and cleanup paths. The CI workflow never requires production credentials.

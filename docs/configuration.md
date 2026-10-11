@@ -27,6 +27,6 @@ Built-in issuers:
 
 An empty optional environment variable uses its default. Remove an issuer by providing the other issuer alone. Arbitrary issuer discovery is deliberately unsupported until its outbound trust boundary is explicitly defined.
 
-The runtime service account needs `roles/cloudkms.signerVerifier` on the single signing CryptoKey. It does not need import/admin roles. The person importing the key needs separate KMS import-job creation/read, CryptoKey read, key-version import/read permissions and ADC. Enable the Cloud Run and KMS APIs before deploying the service.
+The runtime service account needs `roles/cloudkms.signerVerifier` on the single signing CryptoKey. It does not need import/admin roles. The person importing the key needs separate KMS import-job creation/read, CryptoKey read, key-version import/read permissions and ADC. Enable the Cloud Run and KMS APIs before Terraform.
 
 JSON logs contain `exchange_authorized`, `exchange_denied`, and `exchange_success` events. Authenticated identity fields, scope, identity, reason, installation ID, and effective permissions are logged as applicable. Tokens, authorization headers, PEM material, and upstream HTTP bodies are not logged. Restrict log access because email and subject are identity data.
