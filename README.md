@@ -23,7 +23,7 @@ Release images are published to `ghcr.io/sakajunquality/gsts` for `linux/amd64` 
 
 ```sh
 # After the corresponding release workflow succeeds:
-docker run --rm ghcr.io/sakajunquality/gsts:v0.1.0-alpha.1 version
+docker run --rm ghcr.io/sakajunquality/gsts:v0.1.0-alpha.2 version
 ```
 
 The workflow summary includes the image digest. Use `ghcr.io/sakajunquality/gsts@sha256:...` in deployment configuration to pin the exact tested image. See [the deployment runbook](docs/deployment.md) for Cloud Run and KMS setup.
