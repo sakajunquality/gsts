@@ -17,6 +17,17 @@ flowchart LR
 
 The runtime is one Go binary in one container. There is no database, webhook service, or eventing dependency. Cloud KMS holds the GitHub App's imported signing key; application instances only receive signatures. Callers never need that key.
 
+## Container image
+
+Release images are published to `ghcr.io/sakajunquality/gsts` for `linux/amd64` and `linux/arm64` by the [Release image workflow](https://github.com/sakajunquality/gsts/actions/workflows/image.yml). Use an explicit version tag from a successful run; `latest` is updated only for stable releases. Alpha/beta/RC tags are intended for live acceptance testing and do not imply production readiness.
+
+```sh
+# After the corresponding release workflow succeeds:
+docker run --rm ghcr.io/sakajunquality/gsts:v0.1.0-alpha.1 version
+```
+
+The workflow summary includes the image digest. Use `ghcr.io/sakajunquality/gsts@sha256:...` in deployment configuration to pin the exact tested image. See [the deployment runbook](docs/deployment.md) for Cloud Run and KMS setup.
+
 ## Quick example
 
 Put `.github/gsts/deploy.sts.toml` on the target repository's default branch:
@@ -89,7 +100,7 @@ Omitting an org policy's `repositories` permits all repositories accessible to t
 
 ## Local development
 
-Requires Go 1.26.8 or later. The Terraform module requires Terraform 1.6 or later; mocked plan tests require Terraform 1.7 or later.
+Requires Go 1.26.9 or later. The Terraform module requires Terraform 1.6 or later; mocked plan tests require Terraform 1.7 or later.
 
 ```sh
 cp .env.example .env

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Update Go to 1.26.9 and x/net to v0.60.0 with required transitive dependencies for the October security fixes.
+- Add prerelease/manual GHCR publication, digest-based promotion, and dual-platform version checks.
+
 - OIDC exchange for Google service accounts and GitHub Actions.
 - Repository/org TOML trust policies, Google selectors, and request scope narrowing.
 - Cloud KMS signing with CRC32C integrity checks and App JWT caching.
