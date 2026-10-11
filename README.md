@@ -2,7 +2,7 @@
 
 Exchange Google Cloud workload identity for scoped GitHub App installation tokens.
 
-**Status: pre-release.** `v0.1.0-alpha.2` passed a live Cloud Run / Cloud KMS / GitHub acceptance test of its core exchange, policy and revocation paths. For `v0.2.0`, a tool-assisted security review, local rate-limit boundary and fault-injection tests, dependency and container-provenance checks, and repository security settings are recorded in the [acceptance and release-gate record](docs/acceptance.md); live acceptance of the v0.2 features is recorded there once done. Not done: long-running soak testing and a human third-party security audit. No production deployment is assumed.
+**Status: `v0.2.0` is the first stable release.** `v0.2.0-rc.1` (the same code) passed a live Cloud Run / Cloud KMS / GitHub acceptance test of the exchange, policy, replay-denial, pinned-commit and revocation paths, and a tool-assisted security review, local rate-limit boundary and fault-injection tests, dependency and container-provenance checks are recorded in the [acceptance and release-gate record](docs/acceptance.md). Not verified live: organization trusted-issuer enforcement and the exact-match `claim` table (offline tests only), long-running operation, and KMS/GitHub fault injection. There has been no human third-party security audit.
 
 A workload sends an OIDC ID token to gsts. gsts verifies it, reads a trust policy from the target repository's default branch, and returns an installation access token. Google service accounts and GitHub Actions are supported.
 
@@ -23,7 +23,7 @@ Release images are published to `ghcr.io/sakajunquality/gsts` for `linux/amd64` 
 
 ```sh
 # After the corresponding release workflow succeeds:
-docker run --rm ghcr.io/sakajunquality/gsts:v0.1.0-alpha.2 version
+docker run --rm ghcr.io/sakajunquality/gsts:v0.2.0 version
 ```
 
 The workflow summary includes the image digest. Use `ghcr.io/sakajunquality/gsts@sha256:...` in deployment configuration to pin the exact tested image. See [the deployment runbook](docs/deployment.md) for Cloud Run and KMS setup.
