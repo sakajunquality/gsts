@@ -2,34 +2,67 @@ name: Release image
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing release tag (for example v0.1.0-alpha.1)
+        required: true
+        type: string
 permissions:
   contents: read
+concurrency:
+  group: image-publication
+  cancel-in-progress: false
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      sha: ${{ steps.release.outputs.sha }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
+          fetch-depth: 0
           persist-credentials: false
-      - name: Validate release tag
+      - name: Select release source
+        id: release
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: '[[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]'
+          RELEASE_TAG: ${{ inputs.version || github.ref_name }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            test "$GITHUB_REF" = refs/heads/main
+          fi
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$ ]]
+          sha=$(git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}")
+          git merge-base --is-ancestor "$sha" origin/main
+          git checkout --detach "$sha"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
       - run: go vet ./...
       - run: go test -race ./...
       - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: 1.15.2
+      - run: terraform fmt -check -recursive terraform
+      - run: terraform -chdir=terraform/google init -backend=false
+      - run: terraform -chdir=terraform/google validate
+      - run: terraform -chdir=terraform/google test
   publish:
     needs: validate
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
+          ref: ${{ needs.validate.outputs.sha }}
           persist-credentials: false
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -43,17 +76,45 @@ jobs:
         env:
           REPOSITORY: ${{ github.repository }}
         run: echo "name=ghcr.io/${REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+      - name: Build candidate by digest
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.image.outputs.name }}:${{ github.ref_name }}
-          build-args: VERSION=${{ github.ref_name }}
+          outputs: type=image,name=${{ steps.image.outputs.name }},push-by-digest=true,name-canonical=true,push=true
+          build-args: VERSION=${{ needs.validate.outputs.tag }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.revision=${{ needs.validate.outputs.sha }}
+            org.opencontainers.image.version=${{ needs.validate.outputs.tag }}
             org.opencontainers.image.licenses=Apache-2.0
-          provenance: true
+          provenance: mode=max
           sbom: true
+      - name: Smoke test both platforms
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}@${{ steps.build.outputs.digest }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          for arch in amd64 arm64; do
+            docker pull --platform "linux/$arch" "$IMAGE"
+            test "$(docker run --rm --platform "linux/$arch" "$IMAGE" version)" = "$RELEASE_TAG"
+            docker image rm "$IMAGE"
+          done
+      - name: Publish verified image tags
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          tags=(--tag "$IMAGE:$RELEASE_TAG")
+          if [[ "$RELEASE_TAG" != *-* ]]; then
+            tags+=(--tag "$IMAGE:latest")
+          fi
+          docker buildx imagetools create "${tags[@]}" "$IMAGE@$DIGEST"
+          {
+            echo '### Published image'
+            echo "\`$IMAGE:$RELEASE_TAG\`"
+            echo "\`$IMAGE@$DIGEST\`"
+            echo 'Platforms: linux/amd64, linux/arm64. Includes provenance and SBOM.'
+          } >> "$GITHUB_STEP_SUMMARY"

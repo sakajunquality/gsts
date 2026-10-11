@@ -2,7 +2,7 @@
 
 Exchange Google Cloud workload identity for scoped GitHub App installation tokens.
 
-**Status: pre-release.** The local test suite does not replace a live Cloud Run / KMS / GitHub acceptance test. No published release or production deployment is assumed.
+**Status: pre-release.** The local test suite and Terraform validation do not replace a live Cloud Run / KMS / GitHub acceptance test. No published release or production deployment is assumed.
 
 A workload sends an OIDC ID token to gsts. gsts verifies it, reads a trust policy from the target repository's default branch, and returns an installation access token. Google service accounts and GitHub Actions are supported.
 
@@ -16,6 +16,17 @@ flowchart LR
 ```
 
 The runtime is one Go binary in one container. There is no database, webhook service, or eventing dependency. Cloud KMS holds the GitHub App's imported signing key; application instances only receive signatures. Callers never need that key.
+
+## Container image
+
+Release images are published to `ghcr.io/sakajunquality/gsts` for `linux/amd64` and `linux/arm64` by the [Release image workflow](https://github.com/sakajunquality/gsts/actions/workflows/image.yml). Use an explicit version tag from a successful run; `latest` is updated only for stable releases. Alpha/beta/RC tags are intended for live acceptance testing and do not imply production readiness.
+
+```sh
+# After the corresponding release workflow succeeds:
+docker run --rm ghcr.io/sakajunquality/gsts:v0.1.0-alpha.1 version
+```
+
+The workflow summary includes the image digest. Use `ghcr.io/sakajunquality/gsts@sha256:...` in deployment configuration to pin the exact tested image. See [the deployment runbook](docs/deployment.md) for Cloud Run and KMS setup.
 
 ## Quick example
 
@@ -54,7 +65,7 @@ curl --fail-with-body --silent --show-error "$GSTS_URL/token" \
 
 ## Deploy
 
-The Terraform module and Cloud Run deployment runbook are being reviewed separately and are not included in this initial commit. Live Cloud Run / KMS / GitHub acceptance remains pending.
+See [Cloud Run deployment](docs/deployment.md) for the complete bootstrap, import, and rotation procedure. The [Terraform module](terraform/google/README.md) creates only Cloud Run, a KMS key ring and import-only key, a runtime service account, and IAM bindings.
 
 A GitHub App private key is required to issue installation tokens. Generate it in GitHub and import the downloaded PEM into KMS with `gsts kms-import`. **The key exists outside KMS during initial generation/import; after import, the runtime never exports it.** This is not a fully keyless GitHub authentication scheme. See [GitHub's key documentation](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/managing-private-keys-for-github-apps).
 
@@ -89,7 +100,7 @@ Omitting an org policy's `repositories` permits all repositories accessible to t
 
 ## Local development
 
-Requires Go 1.26.8 or later.
+Requires Go 1.26.9 or later. The Terraform module requires Terraform 1.6 or later; mocked plan tests require Terraform 1.7 or later.
 
 ```sh
 cp .env.example .env

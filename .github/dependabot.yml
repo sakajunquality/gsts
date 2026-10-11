@@ -12,3 +12,7 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  - package-ecosystem: terraform
+    directory: /terraform/google
+    schedule:
+      interval: weekly

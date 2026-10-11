@@ -11,7 +11,8 @@ The initial September 2026 proposal is implemented as an independent Go service 
 - Request narrowing ships immediately. Empty permissions/repository constraints are rejected instead of turning into GitHub's default full installation scope. Org permissions require org policies; repository policies cannot widen authority to the organization.
 - KMS import uses Google's Go SDK, RSA-OAEP-SHA256 to wrap an ephemeral AES-256 key, and Tink RFC 5649 KWP to wrap the PKCS#8 material. No custom AES or RSA implementation. KMS signing includes CRC32C request/response integrity checks.
 - Startup App-permission introspection is best effort, not readiness. It supplies warning logs when available; GitHub's issuance API is authoritative.
-- The initial Cloud Run revision must listen before the signing key is imported. Use a TCP startup probe, while `/healthz` checks signing readiness. Correct first-version imports need no redeployment; changing the configured key version does.
+- The initial Cloud Run revision must listen before the signing key is imported. Terraform uses a TCP startup probe, while `/healthz` checks signing readiness. Correct first-version imports need no second apply; rotations do.
+- `image` is required until a release actually exists. `identifier` is a stable audience URL independent of the generated service URL. Custom-domain/DNS resources are outside the minimal Terraform module. Private package deployment can require separate image storage setup.
 
 ## Compatibility
 
