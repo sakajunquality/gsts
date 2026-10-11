@@ -22,3 +22,5 @@ The KMS key always has `prevent_destroy = true`. Removing that protection is an 
 `allow_unauthenticated = false` requires separately managed invoker bindings and the two-header approach documented in the runbook. Custom domains and image registries are managed outside this module. For production, pin the image to a digest.
 
 Run `make terraform-check` from the repository root with Terraform 1.7+ to validate and run mocked plan tests without cloud credentials. The module itself supports Terraform 1.6+.
+
+The startup probe uses `/live`, permitting bootstrap before key import. Use `/ready` to monitor fresh KMS signing and GitHub App authentication (10-second result cache). Exchange admission is configured with `allowed_audiences` (empty defaults to `identifier`), `max_concurrent_exchanges` (16), `exchange_rate_per_minute` (60), and `exchange_burst` (10). Budgets are per process: consider `max_instances`, overlapping revisions and GitHub API quota together. Each environment should instantiate its own module and use its own App/key.

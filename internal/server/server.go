@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +33,7 @@ type GitHub interface {
 	Revoke(context.Context, string) error
 }
 type Server struct {
+	admission      admission
 	readiness      readinessState
 	Config         config.Config
 	Verifier       Verifier
@@ -65,7 +67,7 @@ func write(w http.ResponseWriter, status int, value any) {
 }
 func (s *Server) deny(w http.ResponseWriter, log *slog.Logger, status int, reason string, err error) {
 	log.Warn("exchange_denied", "reason", reason, "detail", err)
-	messages := map[string]string{"invalid_request": "invalid request", "invalid_token": "invalid ID token", "policy_mismatch": "access denied", "scope_not_allowed": "scope not allowed", "not_found": "policy or installation not found", "rate_limited": "upstream rate limit", "upstream_error": "upstream service unavailable", "invalid_policy": "invalid trust policy"}
+	messages := map[string]string{"invalid_request": "invalid request", "invalid_token": "invalid ID token", "policy_mismatch": "access denied", "scope_not_allowed": "scope not allowed", "not_found": "policy or installation not found", "rate_limited": "upstream rate limit", "overloaded": "exchange limit exceeded", "audience_not_allowed": "audience not allowed", "upstream_error": "upstream service unavailable", "invalid_policy": "invalid trust policy"}
 	write(w, status, map[string]string{"error": messages[reason], "reason": reason})
 }
 func (s *Server) upstream(w http.ResponseWriter, log *slog.Logger, err error) {
@@ -92,6 +94,13 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 	defer cancel()
 	log := s.Log
+	release, retry := s.admission.acquire(s.Config, time.Now())
+	if release == nil {
+		w.Header().Set("Retry-After", strconv.Itoa(retry))
+		s.deny(w, log, 429, "overloaded", errors.New("instance admission limit"))
+		return
+	}
+	defer release()
 	r.Body = http.MaxBytesReader(w, r.Body, 16384)
 	var req request
 	dec := json.NewDecoder(r.Body)
@@ -134,6 +143,11 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 		default:
 			s.deny(w, log, 401, "invalid_token", err)
 		}
+		return
+	}
+	claims, allowed := admittedClaims(claims, s.Config)
+	if !allowed {
+		s.deny(w, log, 403, "audience_not_allowed", errors.New("audience outside service allowlist"))
 		return
 	}
 	email, _ := claims["email"].(string)

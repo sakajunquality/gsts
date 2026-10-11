@@ -86,3 +86,43 @@ variable "deletion_protection" {
   type        = bool
   default     = true
 }
+
+variable "allowed_audiences" {
+  description = "Exact service audience allowlist; empty defaults to identifier. Policies cannot expand this list."
+  type        = list(string)
+  default     = []
+  validation {
+    condition     = alltrue([for audience in var.allowed_audiences : length(trimspace(audience)) > 0 && length(audience) <= 2048 && !can(regex("[,\\r\\n\\t]", audience))])
+    error_message = "Audiences must be nonempty, at most 2048 characters, and contain no commas or control whitespace."
+  }
+}
+
+variable "max_concurrent_exchanges" {
+  description = "Per-instance exchange admission limit; see docs/api.md."
+  type        = number
+  default     = 16
+  validation {
+    condition     = var.max_concurrent_exchanges >= 1 && var.max_concurrent_exchanges <= 10000 && floor(var.max_concurrent_exchanges) == var.max_concurrent_exchanges
+    error_message = "Use a positive integer no larger than 10000."
+  }
+}
+
+variable "exchange_rate_per_minute" {
+  description = "Per-instance exchange admission limit; see docs/api.md."
+  type        = number
+  default     = 60
+  validation {
+    condition     = var.exchange_rate_per_minute >= 1 && var.exchange_rate_per_minute <= 1000000 && floor(var.exchange_rate_per_minute) == var.exchange_rate_per_minute
+    error_message = "Use a positive integer no larger than 1000000."
+  }
+}
+
+variable "exchange_burst" {
+  description = "Per-instance exchange admission limit; see docs/api.md."
+  type        = number
+  default     = 10
+  validation {
+    condition     = var.exchange_burst >= 1 && var.exchange_burst <= 1000000 && floor(var.exchange_burst) == var.exchange_burst
+    error_message = "Use a positive integer no larger than 1000000."
+  }
+}
