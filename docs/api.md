@@ -42,7 +42,7 @@ Clients should branch on `reason`, not the human-readable `error`. Claim mismatc
 | 400 | `invalid_request` | Invalid body, scope, auth header, or malformed JWT |
 | 401 | `invalid_token` | Disallowed issuer, invalid signature/algorithm, missing identity claims, invalid/expired timestamps |
 | 403 | `audience_not_allowed` | No audience in the service allowlist; rejected before KMS/GitHub |
-| 403 | `token_replayed` | This ID token was already exchanged on this instance and has not expired; rejected before KMS/GitHub |
+| 403 | `token_replayed` | This ID token was already used in an exchange attempt on this instance (including attempts that failed after verification) and has not expired; rejected before KMS/GitHub |
 | 403 | `scope_not_allowed` | Org allowlist rejection |
 | 403 | `policy_mismatch` | Audience/identity/claim mismatch or excessive requested scope |
 | 403 | `invalid_policy` | Invalid TOML, missing constraints, or invalid permission scope; also an invalid [organization trust file](policies.md#organization-trusted-issuers) |
