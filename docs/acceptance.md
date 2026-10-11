@@ -2,7 +2,7 @@
 
 ## v0.2.0 release gate
 
-This section records the release-gate work for `v0.2.0`, done on 2026-10-11 against `v0.2.0-alpha.1` and the fixes on the `release/v0.2.0` branch. Each item states what was done and what it does not show.
+This section records the release-gate work for `v0.2.0`, done on 2026-10-11 against `v0.2.0-alpha.1`, the fixes on the `release/v0.2.0` branch, and the `v0.2.0-rc.1` live acceptance. Each item states what was done and what it does not show.
 
 ### Repository and package
 
@@ -44,18 +44,42 @@ A static, read-only security review of `v0.2.0-alpha.1` was performed with Codex
 
 An earlier Codex review of the v0.2 feature branch found four issues (signature re-encoding bypass of replay protection, the org-trust read-token fallback, live-entry eviction, an expiry race); those were fixed before `v0.2.0-alpha.1`.
 
-### Live acceptance of the v0.2 features
+### Live acceptance of v0.2.0-rc.1
 
-**Pending.** Before tagging `v0.2.0`, run the following against a deployment of the `v0.2.0` candidate image and record the results here:
+The maintainer deployed `v0.2.0-rc.1` (release commit `a9d284b0dfc02f8cf7fc919854131b4ab4ce5686`, image index `sha256:71be10e9041f631b39fa89821741492e4f0674e9ede17288a1793d3b99140d97`, verified Linux amd64 image `sha256:ad1ddf36f9cfe03780c943a25d9a1c72761eaf885f154954f87d7d5ea2a5ed42`) to five isolated Cloud Run services with Cloud KMS-backed GitHub App signing. All services became Ready and returned HTTP 200 from `/live` and `/ready`. The deployed digest, issuer/audience settings and replay configuration were checked.
 
-- Same ID token exchanged twice on one instance: second response is 403 `token_replayed`.
-- `GSTS_ORG_TRUST_FILE` enabled, trust file allowing only the Google issuer: a GitHub Actions token is rejected with 403 `issuer_not_trusted`; a Google token succeeds; an organization without the file still succeeds.
-- A policy with `claim = { repository_id = "..." }`: the matching workflow succeeds and a workflow from another repository is rejected with 403 `policy_mismatch`.
-- `/ready` returns 200 and an ordinary exchange succeeds on the candidate image, confirming the pinned-commit policy reads work against GitHub.
+Verified against live services:
+
+- Six Google service-account identities exchanged OIDC ID tokens for installation tokens. Requested read permissions were preserved, and all test tokens were explicitly revoked with HTTP 204.
+- The official GitHub Action exchanged GitHub Actions OIDC tokens. The issued token was limited to the intended repository, and post-job revocation succeeded.
+- An incorrect audience and an organization outside the allowed scope were rejected with HTTP 403 `audience_not_allowed` and `scope_not_allowed`. Google-only services rejected GitHub Actions identities with HTTP 401 `invalid_token`.
+- A valid OIDC token from an unauthorized workflow was rejected with HTTP 403 `policy_mismatch`. Three further attempts with the same token were rejected with HTTP 403 `token_replayed`, confirming that a denied attempt also consumes the token on the observed instance.
+- Successful exchange logs from all five new revisions included `policy_commit` values matching the policy repositories' expected default-branch commits.
+- Renovate completed a full dry run, including dependency extraction and checksum lookup, without warnings or errors; the Action revoked its installation token afterwards.
+- Automated branch and pull-request creation with rc-issued tokens succeeded.
+- Seven production runner labels passed identity, credential-isolation and installed-tool checks. All jobs survived the 120-second idle threshold with a 130-second step, and all temporary runner registrations disappeared after completion.
+
+Validation before deployment:
+
+- All 35 infrastructure CI checks passed; the plan changed only the five token services, and all applies succeeded.
+- All eight configured policies validated with the rc image, and 20 offline allow/deny fixtures passed.
+- 23 Python tests, three Terraform mock tests, workflow lint and formatting checks passed.
+- Upstream release-image CI, main CI, Action tests and policy examples passed for the tagged commit. Image version and revision were checked; the amd64 registry mirror retained the upstream digest.
+
+Scope and limitations stated in the report:
+
+- The results confirm the integration paths above, not every v0.2 feature or failure scenario.
+- Replay protection was enabled on the GitHub Actions service and explicitly disabled on the four Google-metadata clients to keep reusable ID tokens working. The store is per instance, not a distributed guarantee.
+- Organization trusted-issuer enforcement was not enabled in that deployment, and the exact-match `claim` table was not exercised; existing `claim_pattern` policies were used.
+- Response-delivery-failure revocation and cancelled-request JWKS refresh were covered by upstream tests, not by live fault injection.
+- Long-duration operation, replay-store exhaustion and live policy changes racing an exchange were not tested.
+
+No functional failures were observed in the deployed configuration's acceptance checks. The report does not itself certify the release.
 
 ### Not covered
 
-- Long-running continuous operation.
+- Live exercise of `GSTS_ORG_TRUST_FILE` enforcement and of the exact-match `claim` table (offline tests only).
+- Long-running continuous operation and replay-store exhaustion.
 - Live KMS and GitHub fault injection.
 - A human third-party security audit.
 
@@ -98,4 +122,4 @@ Within the scope verified, KMS signing, OIDC exchange, policy allow/deny decisio
 - KMS and GitHub fault injection.
 - Long-running continuous operation.
 
-Features added after `v0.1.0-alpha.2` (per-instance replay prevention, the organization trusted-issuer allowlist and the exact-match `claim` table) were not part of this test and have not been live-tested. No independent security review has been done.
+Features added after `v0.1.0-alpha.2` (per-instance replay prevention, the organization trusted-issuer allowlist and the exact-match `claim` table) were not part of this test and were not live-tested at that time; see the v0.2.0 release gate above. No independent security review has been done.

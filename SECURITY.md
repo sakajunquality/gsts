@@ -1,6 +1,6 @@
 # Security
 
-This project is pre-release. `v0.1.0-alpha.2` passed a live acceptance test of its core paths ([record](docs/acceptance.md)), but there has been no independent security review, and rate-limit boundary, fault-injection and long-running tests have not been done. The v0.2 features on the development branch have not been live-tested. Do not infer a security audit or production readiness.
+`v0.2.0` is the first stable release. Its release gate ([record](docs/acceptance.md)) covered live acceptance of the exchange, policy, replay-denial, pinned-commit and revocation paths, a tool-assisted (Codex) security review with all findings fixed, local rate-limit boundary and fault-injection tests, and dependency and provenance checks. Organization trusted-issuer enforcement and the `claim` table were verified offline only, long-running operation and live fault injection were not tested, and there has been no human third-party security audit. Do not infer more than that record states.
 
 ## Reporting a vulnerability
 

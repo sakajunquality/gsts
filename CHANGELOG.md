@@ -2,10 +2,18 @@
 
 ## Unreleased
 
+## v0.2.0
+
+First stable release. `v0.2.0-rc.1` (same code) passed live Cloud Run / Cloud KMS / GitHub acceptance of the exchange, policy, replay-denial, pinned-commit and revocation paths ([record](docs/acceptance.md)); organization trusted-issuer enforcement and the `claim` table were verified offline only. Stable tags update `latest`.
+
+Changes since `v0.2.0-alpha.1`:
+
 - Pin policy reads to one revision: each exchange resolves the default branch head commit of each repository it reads and fetches the trust file and identity policy at that SHA, so a branch update mid-exchange cannot combine files from different revisions. Adds one GitHub call per repository read; logs `policy_commit` / `org_trust_commit`.
 - Revoke the minted caller token when the response cannot be delivered (request already cancelled before the write, or a write/flush error), log `caller_token_revoked_undelivered`, and log `exchange_success` only after delivery.
 - Run JWKS discovery/refresh on its own deadline, independent of the initiating request, and apply the 30-second unknown-key throttle only after the attempt completes, so a cancelled request cannot leave an issuer's empty key cache throttled.
-- Record the `v0.2.0` release-gate work (repository security settings, dependency and provenance checks, local rate-limit boundary and fault-injection tests, tool-assisted security review) in `docs/acceptance.md`.
+- Record the `v0.2.0` release-gate work (repository security settings, dependency and provenance checks, local rate-limit boundary and fault-injection tests, tool-assisted security review) and the `v0.2.0-rc.1` live acceptance in `docs/acceptance.md`.
+
+Changes since `v0.1.0-alpha.2` are listed under `v0.2.0-alpha.1` below.
 
 ## v0.2.0-alpha.1
 
