@@ -114,3 +114,36 @@ func TestPEMFormats(t *testing.T) {
 		}
 	}
 }
+
+func TestFreshTokenBypassesCache(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer := &countingSigner{local: Local{Key: key}}
+	app := &AppJWT{Signer: signer, AppID: "123"}
+	cached, err := app.Token(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	refresh := app.refresh
+	if _, err := app.FreshToken(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if signer.count.Load() != 2 || app.token != cached || !app.refresh.Equal(refresh) {
+		t.Fatal("fresh signing must bypass and preserve cache")
+	}
+	app.Signer = failingSigner{}
+	if _, err := app.FreshToken(context.Background()); err == nil {
+		t.Fatal("fresh signing hid failure behind cache")
+	}
+	if token, err := app.Token(context.Background()); err != nil || token != cached {
+		t.Fatal("readiness must not modify exchange cache")
+	}
+}
+
+type failingSigner struct{}
+
+func (failingSigner) Sign(context.Context, []byte) ([]byte, error) {
+	return nil, errors.New("signing unavailable")
+}

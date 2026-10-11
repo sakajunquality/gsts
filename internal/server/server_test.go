@@ -190,17 +190,15 @@ func TestCanceledCleanup(t *testing.T) {
 }
 func TestHealthAndMethods(t *testing.T) {
 	s, _, _ := fixture()
-	for _, fail := range []bool{false, true} {
-		s.Signer = signerStub{}
-		want := 200
-		if fail {
-			s.Signer = signerStub{err: errors.New("empty key")}
-			want = 503
-		}
+	for _, path := range []string{"/live", "/healthz"} {
 		w := httptest.NewRecorder()
-		s.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/healthz", nil))
+		s.Handler().ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		want := 200
+		if path == "/healthz" {
+			want = 404
+		}
 		if w.Code != want {
-			t.Fatal(w.Code)
+			t.Fatal(path, w.Code)
 		}
 	}
 	w := httptest.NewRecorder()

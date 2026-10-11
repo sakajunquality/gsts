@@ -32,6 +32,7 @@ type GitHub interface {
 	Revoke(context.Context, string) error
 }
 type Server struct {
+	readiness      readinessState
 	Config         config.Config
 	Verifier       Verifier
 	Signer         AppSigner
@@ -48,7 +49,8 @@ type request struct {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", s.health)
+	mux.HandleFunc("GET /live", s.live)
+	mux.HandleFunc("GET /ready", s.ready)
 	mux.HandleFunc("POST /token", s.exchange)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -60,15 +62,6 @@ func write(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
-}
-func (s *Server) health(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-	if _, err := s.Signer.Token(ctx); err != nil {
-		write(w, 503, map[string]bool{"ok": false})
-		return
-	}
-	write(w, 200, map[string]bool{"ok": true})
 }
 func (s *Server) deny(w http.ResponseWriter, log *slog.Logger, status int, reason string, err error) {
 	log.Warn("exchange_denied", "reason", reason, "detail", err)
