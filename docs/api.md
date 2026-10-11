@@ -41,15 +41,27 @@ Clients should branch on `reason`, not the human-readable `error`. Claim mismatc
 | --- | --- | --- |
 | 400 | `invalid_request` | Invalid body, scope, auth header, or malformed JWT |
 | 401 | `invalid_token` | Disallowed issuer, invalid signature/algorithm, missing identity claims, invalid/expired timestamps |
+| 403 | `audience_not_allowed` | No audience in the service allowlist; rejected before KMS/GitHub |
 | 403 | `scope_not_allowed` | Org allowlist rejection |
 | 403 | `policy_mismatch` | Audience/identity/claim mismatch or excessive requested scope |
 | 403 | `invalid_policy` | Invalid TOML, missing constraints, or invalid permission scope |
 | 404 | `not_found` | Installation or policy lookup returned 404 |
+| 429 | `overloaded` | Local concurrency or request-rate limit |
 | 429 | `rate_limited` | GitHub primary or secondary rate limit |
 | 502 | `upstream_error` | GitHub, OIDC provider, or KMS failure; includes temporary-token revocation failure |
 
 GitHub 422 (for example, the App lacks a requested permission) is an upstream error. The request is not retried automatically: retrying token creation can mint extra tokens. Use bounded backoff for safe retries and never assume a failed network response means GitHub created no token.
 
-## GET /healthz
+## GET /live and GET /ready
 
-HTTP 200 `{"ok":true}` means the signer can supply an App JWT, possibly from cache. HTTP 503 `{"ok":false}` means signing is unavailable. This is signing readiness, not an end-to-end GitHub/JWKS health check. Use a TCP startup probe so an empty import-only key can bootstrap. Unknown routes and unsupported methods use normal HTTP 404/405 responses.
+`/live` reports that the process is serving without contacting dependencies. `/ready` signs a fresh App JWT and authenticates to GitHub, returning 200 or 503. Readiness results are cached for 10 seconds and checks have a 5-second timeout. Use `/live` for startup/liveness, and `/ready` for dependency monitoring. `/healthz` has been removed to avoid Cloud Run's reserved-path conflicts; update existing monitors. See [health probes](health.md).
+
+## Admission and retry controls
+
+The service allowlist `GSTS_ALLOWED_AUDIENCES` defaults to `GSTS_IDENTIFIER`. After identity verification and before signing or any GitHub call, a token must contain an allowed audience. Policies can match only audiences in that intersection; they cannot expand the service allowlist. Deployments with custom policy audiences must explicitly list them. A listed audience still needs to satisfy the policy.
+
+Exchange attempts (including invalid credentials) share a per-instance token bucket and concurrency cap. Defaults are 60 attempts/minute, burst 10, and 16 in-flight requests. Rejected admission returns 429 `overloaded` with `Retry-After` seconds before OIDC/KMS/GitHub calls. This bounds each process, not a fleet-wide quota or per-identity fairness. Configure limits with your GitHub quota and Cloud Run instance cap in mind; fresh instances start with a full burst. Health probes use a separate bounded cache.
+
+GitHub rate-limit responses include normalized `Retry-After` when available. Otherwise primary-limit reset time is converted to seconds, with 60 seconds as the fallback. gsts never automatically retries exchange or token creation. Clients should respect `Retry-After`, use bounded attempts and jitter, and account for ambiguous failures that may already have minted a token.
+
+Every `/token` response has a generated `X-Request-ID` for log correlation; inbound request IDs are not trusted. Logs include per-stage `duration_ms`, safe GitHub request IDs on failures, and the applied policy's repository, path and SHA-256 of fetched bytes. The hash identifies the exact policy contents, not a Git commit or proof of branch protection. Tokens and upstream bodies are never diagnostic fields.

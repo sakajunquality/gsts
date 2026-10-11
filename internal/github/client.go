@@ -11,12 +11,15 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
 type APIError struct {
+	RetryAfter  string
+	RequestID   string
 	Status      int
 	RateLimited bool
 }
@@ -78,7 +81,7 @@ func (c *Client) call(ctx context.Context, method, path, auth string, body, out 
 		// Inspect only rate-limit markers; never retain upstream token-bearing bodies.
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
 		limited := resp.StatusCode == 429 || (resp.StatusCode == 403 && (resp.Header.Get("X-RateLimit-Remaining") == "0" || resp.Header.Get("Retry-After") != "" || bytes.Contains(bytes.ToLower(data), []byte("rate limit"))))
-		return &APIError{Status: resp.StatusCode, RateLimited: limited}
+		return &APIError{Status: resp.StatusCode, RateLimited: limited, RetryAfter: retryAfter(resp.Header, limited, time.Now()), RequestID: safeRequestID(resp.Header.Get("X-GitHub-Request-Id"))}
 	}
 	if out == nil {
 		return nil
@@ -159,4 +162,36 @@ func (c *Client) AppPermissions(ctx context.Context, jwt string) (map[string]str
 	}
 	err := c.call(ctx, "GET", "/app", jwt, nil, &app)
 	return app.Permissions, err
+}
+
+// retryAfter preserves valid Retry-After values and translates the primary
+// rate-limit reset into seconds. No request, especially token minting, is retried.
+func retryAfter(h http.Header, limited bool, now time.Time) string {
+	if !limited {
+		return ""
+	}
+	raw := strings.TrimSpace(h.Get("Retry-After"))
+	if n, err := strconv.ParseUint(raw, 10, 32); err == nil {
+		return strconv.FormatUint(n, 10)
+	}
+	if date, err := http.ParseTime(raw); err == nil {
+		return date.UTC().Format(http.TimeFormat)
+	}
+	if h.Get("X-RateLimit-Remaining") == "0" {
+		if reset, err := strconv.ParseInt(h.Get("X-RateLimit-Reset"), 10, 64); err == nil && reset >= 0 && reset <= 253402300799 {
+			return strconv.FormatInt(max(1, reset-now.Unix()), 10)
+		}
+	}
+	return "60"
+}
+func safeRequestID(id string) string {
+	if len(id) > 128 {
+		return ""
+	}
+	for _, c := range id {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == ':' || c == '-') {
+			return ""
+		}
+	}
+	return id
 }
