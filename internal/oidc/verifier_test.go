@@ -145,6 +145,26 @@ func TestUnknownKidRefreshBound(t *testing.T) {
 		t.Fatalf("unknown kid triggered fetch flood: %d", *calls)
 	}
 }
+func TestCanceledCallerDoesNotPoisonColdCache(t *testing.T) {
+	// A forged-but-well-formed token whose caller disconnects during discovery
+	// must not leave the issuer throttled with an empty key cache.
+	v, key, calls := newFixture(t)
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	forged := jwt.NewWithClaims(jwt.SigningMethodRS256, validClaims())
+	forged.Header["kid"] = "key-1"
+	attackerKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	rawForged, _ := forged.SignedString(attackerKey)
+	if _, err := v.Verify(canceled, rawForged); err == nil {
+		t.Fatal("forged token accepted")
+	}
+	if _, err := v.Verify(context.Background(), sign(t, validClaims(), key)); err != nil {
+		t.Fatal("legitimate token rejected after canceled refresh:", err)
+	}
+	if *calls != 2 {
+		t.Fatalf("refresh did not complete independently of the caller: %d calls", *calls)
+	}
+}
 func TestCacheControl(t *testing.T) {
 	v, _, _ := newFixture(t)
 	v.client.Transport = roundTrip(func(*http.Request) (*http.Response, error) {

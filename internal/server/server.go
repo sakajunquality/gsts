@@ -33,7 +33,8 @@ type AppSigner interface {
 type GitHub interface {
 	Installation(context.Context, string, string) (int64, error)
 	CreateToken(context.Context, int64, string, map[string]string, []string) (github.Token, error)
-	Policy(context.Context, string, string, string, string) ([]byte, error)
+	Head(ctx context.Context, owner, repo, token string) (string, error)
+	Policy(ctx context.Context, owner, repo, path, ref, token string) ([]byte, error)
 	Revoke(context.Context, string) error
 }
 type Server struct {
@@ -239,11 +240,20 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 	log = log.With("policy_repository", owner+"/"+policyRepo, "policy_path", policyPath)
 	var trustData []byte
 	trustFound := false
-	var trustErr, fetchErr error
+	var headErr, trustErr, fetchErr error
 	var data []byte
-	if trustEnabled {
+	// Pin every read to the head commit resolved here, so files in one
+	// repository always come from one revision even if the branch advances.
+	finish = stage(log, "resolve_head")
+	policyCommit, headErr := s.GitHub.Head(ctx, owner, policyRepo, readToken.Token)
+	trustCommit := policyCommit
+	if headErr == nil && trustEnabled && policyRepo != s.Config.OrgPolicyRepo {
+		trustCommit, headErr = s.GitHub.Head(ctx, owner, s.Config.OrgPolicyRepo, readToken.Token)
+	}
+	finish(headErr)
+	if headErr == nil && trustEnabled {
 		finish = stage(log, "fetch_org_trust")
-		trustData, trustErr = s.GitHub.Policy(ctx, owner, s.Config.OrgPolicyRepo, s.Config.OrgTrustFile, readToken.Token)
+		trustData, trustErr = s.GitHub.Policy(ctx, owner, s.Config.OrgPolicyRepo, s.Config.OrgTrustFile, trustCommit, readToken.Token)
 		finish(trustErr)
 		if github.IsNotFound(trustErr) {
 			// No trust file: the organization has not opted in.
@@ -252,9 +262,9 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 			trustFound = true
 		}
 	}
-	if trustErr == nil {
+	if headErr == nil && trustErr == nil {
 		finish = stage(log, "fetch_policy")
-		data, fetchErr = s.GitHub.Policy(ctx, owner, policyRepo, policyPath, readToken.Token)
+		data, fetchErr = s.GitHub.Policy(ctx, owner, policyRepo, policyPath, policyCommit, readToken.Token)
 		finish(fetchErr)
 	}
 	// Revoke before minting the caller's token: cleanup failure cannot orphan a
@@ -266,6 +276,10 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 		s.upstream(w, log, err)
 		return
 	}
+	if headErr != nil {
+		s.upstream(w, log, headErr)
+		return
+	}
 	if trustErr != nil {
 		s.upstream(w, log, trustErr)
 		return
@@ -275,7 +289,7 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if trustFound {
-		log = log.With("org_trust_repository", owner+"/"+s.Config.OrgPolicyRepo, "org_trust_path", s.Config.OrgTrustFile, "org_trust_sha256", fmt.Sprintf("%x", sha256.Sum256(trustData)))
+		log = log.With("org_trust_repository", owner+"/"+s.Config.OrgPolicyRepo, "org_trust_path", s.Config.OrgTrustFile, "org_trust_commit", trustCommit, "org_trust_sha256", fmt.Sprintf("%x", sha256.Sum256(trustData)))
 		finish = stage(log, "parse_org_trust")
 		trust, err := policy.ParseTrust(trustData)
 		finish(err)
@@ -288,7 +302,7 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	log = log.With("policy_sha256", fmt.Sprintf("%x", sha256.Sum256(data)))
+	log = log.With("policy_commit", policyCommit, "policy_sha256", fmt.Sprintf("%x", sha256.Sum256(data)))
 	finish = stage(log, "parse_policy")
 	p, err := policy.Parse(data, repo == "")
 	finish(err)
@@ -325,6 +339,33 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Return the effective permissions from GitHub (includes implicit metadata).
+	s.deliver(w, r, log, token, id)
+}
+
+// deliver writes the minted token and revokes it if the response cannot be
+// delivered, so a privileged token is never abandoned with a gone client.
+func (s *Server) deliver(w http.ResponseWriter, r *http.Request, log *slog.Logger, token github.Token, id int64) {
+	// A client that received the response and closed the connection cancels
+	// the request context too, so cancellation is only checked before the
+	// write; afterwards only a write or flush error means non-delivery.
+	body, err := json.Marshal(token)
+	if err == nil {
+		err = r.Context().Err()
+	}
+	if err == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		if _, err = w.Write(append(body, '\n')); err == nil {
+			// A writer without Flush support is not a delivery failure.
+			if err = http.NewResponseController(w).Flush(); errors.Is(err, http.ErrNotSupported) {
+				err = nil
+			}
+		}
+	}
+	if err != nil {
+		rerr := s.revoke(token.Token)
+		log.Warn("caller_token_revoked_undelivered", "error", err, "revoke_error", rerr)
+		return
+	}
 	log.Info("exchange_success", "installation_id", id, "permissions", token.Permissions)
-	write(w, 200, token)
 }

@@ -63,6 +63,26 @@ type githubStub struct {
 	trustPath                                     string
 	readRepos                                     []string
 	policyFetches                                 []string
+	headErr                                       error
+	heads                                         []string
+	refs                                          map[string]string
+	mintHook                                      func()
+}
+
+func headSHA(repo string) string {
+	if repo == ".github" {
+		return strings.Repeat("b", 40)
+	}
+	return strings.Repeat("a", 40)
+}
+
+func (g *githubStub) Head(_ context.Context, owner, repo, _ string) (string, error) {
+	g.events = append(g.events, "head")
+	g.heads = append(g.heads, owner+"/"+repo)
+	if g.headErr != nil {
+		return "", g.headErr
+	}
+	return headSHA(repo), nil
 }
 
 func (g *githubStub) Installation(context.Context, string, string) (int64, error) {
@@ -82,12 +102,19 @@ func (g *githubStub) CreateToken(_ context.Context, _ int64, _ string, p map[str
 		return github.Token{Token: "read-secret"}, nil
 	}
 	g.events = append(g.events, "caller-token")
+	if g.mintHook != nil {
+		g.mintHook()
+	}
 	g.perms = p
 	g.repos = r
 	return github.Token{Token: "caller-secret", ExpiresAt: time.Now().Add(time.Hour), Permissions: p}, g.mintErr
 }
-func (g *githubStub) Policy(_ context.Context, owner, repo, path, _ string) ([]byte, error) {
+func (g *githubStub) Policy(_ context.Context, owner, repo, path, ref, _ string) ([]byte, error) {
 	g.policyFetches = append(g.policyFetches, owner+"/"+repo+"/"+path)
+	if g.refs == nil {
+		g.refs = map[string]string{}
+	}
+	g.refs[owner+"/"+repo+"/"+path] = ref
 	if g.trustPath != "" && path == g.trustPath {
 		g.events = append(g.events, "trust")
 		return []byte(g.trustSource), g.trustErr
@@ -126,7 +153,7 @@ func TestExchange(t *testing.T) {
 	if w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("cacheable response")
 	}
-	expected := []string{"installation", "read-token", "policy", "revoke:read-secret", "caller-token"}
+	expected := []string{"installation", "read-token", "head", "policy", "revoke:read-secret", "caller-token"}
 	if !reflect.DeepEqual(g.events, expected) {
 		t.Fatal(g.events)
 	}
@@ -258,9 +285,11 @@ func TestHTTPGitHubFlow(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(github.Token{Token: "installation", ExpiresAt: time.Now().Add(time.Hour), Permissions: body.Permissions})
 		case r.Method == "DELETE":
 			w.WriteHeader(204)
+		case r.URL.Path == "/repos/org/repo/commits":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"sha": strings.Repeat("c", 40)}})
 		default:
-			if r.URL.RawQuery != "" {
-				t.Error("branch override")
+			if r.URL.RawQuery != "ref="+strings.Repeat("c", 40) {
+				t.Error("unpinned read", r.URL.RawQuery)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"type": "file", "encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte("[google]\nproject=\"my-project\"\n[permissions]\ncontents=\"read\""))})
 		}
@@ -275,7 +304,7 @@ func TestHTTPGitHubFlow(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("%d: %s", w.Code, w.Body)
 	}
-	if len(calls) != 5 || calls[2] != "GET /repos/org/repo/contents/.github/gsts/deploy.sts.toml" || calls[3] != "DELETE /installation/token" {
+	if len(calls) != 6 || calls[2] != "GET /repos/org/repo/commits?per_page=1" || calls[3] != "GET /repos/org/repo/contents/.github/gsts/deploy.sts.toml?ref="+strings.Repeat("c", 40) || calls[4] != "DELETE /installation/token" {
 		t.Fatal(calls)
 	}
 }
@@ -386,7 +415,7 @@ func TestOrgTrustDisabledAddsNoCalls(t *testing.T) {
 	if !reflect.DeepEqual(g.policyFetches, []string{"org/repo/.github/gsts/deploy.sts.toml"}) || !reflect.DeepEqual(g.readRepos, []string{"repo"}) {
 		t.Fatal(g.policyFetches, g.readRepos)
 	}
-	if !reflect.DeepEqual(g.events, []string{"installation", "read-token", "policy", "revoke:read-secret", "caller-token"}) {
+	if !reflect.DeepEqual(g.events, []string{"installation", "read-token", "head", "policy", "revoke:read-secret", "caller-token"}) {
 		t.Fatal(g.events)
 	}
 }
@@ -395,7 +424,7 @@ func TestOrgTrustAbsentAllows(t *testing.T) {
 	if w := exchangeOnce(s, "t"); w.Code != 200 {
 		t.Fatal(w.Code, w.Body)
 	}
-	if !reflect.DeepEqual(g.events, []string{"installation", "read-token", "trust", "policy", "revoke:read-secret", "caller-token"}) {
+	if !reflect.DeepEqual(g.events, []string{"installation", "read-token", "head", "head", "trust", "policy", "revoke:read-secret", "caller-token"}) {
 		t.Fatal(g.events)
 	}
 }
@@ -505,5 +534,112 @@ func TestOrgTrustLogsFingerprint(t *testing.T) {
 		if !strings.Contains(logs.String(), want) {
 			t.Fatal("missing", want)
 		}
+	}
+}
+
+// failingWriter simulates a client that disconnected before the response.
+type failingWriter struct{ http.ResponseWriter }
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("broken pipe") }
+
+func TestHeadPinsReads(t *testing.T) {
+	s, g := trustFixture(`issuers = ["https://accounts.google.com"]`, nil)
+	logs := new(bytes.Buffer)
+	s.Log = slog.New(slog.NewJSONHandler(logs, nil))
+	if w := exchangeOnce(s, "t"); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	// Repository scope with trust: each repository pinned to its own head.
+	if !reflect.DeepEqual(g.heads, []string{"org/repo", "org/.github"}) {
+		t.Fatal(g.heads)
+	}
+	if g.refs["org/repo/.github/gsts/deploy.sts.toml"] != headSHA("repo") || g.refs["org/.github/"+trustPath] != headSHA(".github") || headSHA("repo") == headSHA(".github") {
+		t.Fatal(g.refs)
+	}
+	for _, want := range []string{`"policy_commit":"` + headSHA("repo") + `"`, `"org_trust_commit":"` + headSHA(".github") + `"`, "resolve_head"} {
+		if !strings.Contains(logs.String(), want) {
+			t.Fatal("missing", want)
+		}
+	}
+}
+func TestHeadSingleCallWithoutTrust(t *testing.T) {
+	s, g, _ := fixture()
+	if w := exchangeOnce(s, "t"); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	if !reflect.DeepEqual(g.heads, []string{"org/repo"}) || g.refs["org/repo/.github/gsts/deploy.sts.toml"] != headSHA("repo") {
+		t.Fatal(g.heads, g.refs)
+	}
+}
+func TestHeadOrgScopeSharesOneCommit(t *testing.T) {
+	s, g := trustFixture(`issuers = ["https://accounts.google.com"]`, nil)
+	g.source = "[google]\nservice_account=\"deploy@my-project.iam.gserviceaccount.com\"\n[permissions]\nmembers=\"read\"\n"
+	r := httptest.NewRequest("POST", "/token", strings.NewReader(`{"scope":"org","identity":"deploy"}`))
+	r.Header.Set("Authorization", "Bearer t")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	if !reflect.DeepEqual(g.heads, []string{"org/.github"}) || len(g.refs) != 2 {
+		t.Fatal(g.heads, g.refs)
+	}
+	for path, ref := range g.refs {
+		if ref != headSHA(".github") {
+			t.Fatal(path, ref)
+		}
+	}
+}
+func TestHeadFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		err    error
+		status int
+		reason string
+	}{{"not found", &github.APIError{Status: 404}, 404, "not_found"}, {"generic", errors.New("boom"), 502, "upstream_error"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, g := trustFixture(`issuers = ["https://accounts.google.com"]`, nil)
+			g.headErr = tc.err
+			w := exchangeOnce(s, "t")
+			if w.Code != tc.status || reasonOf(w) != tc.reason {
+				t.Fatal(w.Code, w.Body)
+			}
+			if len(g.policyFetches) != 0 || slices.Contains(g.events, "caller-token") || !reflect.DeepEqual(g.events, []string{"installation", "read-token", "head", "revoke:read-secret"}) {
+				t.Fatal(g.events, g.policyFetches)
+			}
+		})
+	}
+}
+func TestUndeliveredCallerTokenRevoked(t *testing.T) {
+	s, g, logs := fixture()
+	r := httptest.NewRequest("POST", "/token", strings.NewReader(`{"scope":"org/repo","identity":"deploy"}`))
+	r.Header.Set("Authorization", "Bearer t")
+	s.Handler().ServeHTTP(failingWriter{httptest.NewRecorder()}, r)
+	if g.events[len(g.events)-1] != "revoke:caller-secret" {
+		t.Fatal(g.events)
+	}
+	if !strings.Contains(logs.String(), "caller_token_revoked_undelivered") || strings.Contains(logs.String(), "exchange_success") || strings.Contains(logs.String(), "caller-secret") {
+		t.Fatal(logs.String())
+	}
+}
+func TestCanceledRequestRevokesCallerToken(t *testing.T) {
+	s, g, _ := fixture()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := httptest.NewRequest("POST", "/token", strings.NewReader(`{"scope":"org/repo","identity":"deploy"}`)).WithContext(ctx)
+	r.Header.Set("Authorization", "Bearer t")
+	g.mintHook = cancel
+	s.Handler().ServeHTTP(httptest.NewRecorder(), r)
+	if g.events[len(g.events)-1] != "revoke:caller-secret" {
+		t.Fatal(g.events)
+	}
+}
+func TestDeliveredCallerTokenNotRevoked(t *testing.T) {
+	s, g, logs := fixture()
+	if w := exchangeOnce(s, "t"); w.Code != 200 {
+		t.Fatal(w.Code)
+	}
+	if slices.Contains(g.events, "revoke:caller-secret") || !strings.Contains(logs.String(), "exchange_success") {
+		t.Fatal(g.events)
 	}
 }

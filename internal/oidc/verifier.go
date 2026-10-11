@@ -137,7 +137,13 @@ func (v *Verifier) key(ctx context.Context, iss, kid string) (*rsa.PublicKey, er
 	if p.keys[kid] == nil && now.Before(p.refreshAfter) {
 		return nil, errors.New("unknown or expired signing key")
 	}
-	p.refreshAfter = now.Add(30 * time.Second)
+	// The refresh is shared work for every caller waiting on the mutex, so it
+	// runs on its own deadline rather than the initiating request's context:
+	// a caller that disconnects mid-fetch must not leave the cache empty. The
+	// throttle is applied after the attempt completes, whatever its outcome.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	defer func() { p.refreshAfter = time.Now().Add(30 * time.Second) }()
 	if p.uri == "" {
 		var d struct {
 			Issuer string `json:"issuer"`

@@ -2,7 +2,7 @@
 
 Exchange Google Cloud workload identity for scoped GitHub App installation tokens.
 
-**Status: pre-release.** `v0.1.0-alpha.2` passed a live Cloud Run / Cloud KMS / GitHub acceptance test of its core exchange, policy and revocation paths ([record](docs/acceptance.md)). Not yet done: an independent security review, rate-limit boundary load testing, KMS/GitHub fault-injection testing and long-running soak testing. The v0.2 features on the development branch (replay prevention, organization trusted issuers, `claim`) have not been live-tested. No production deployment is assumed.
+**Status: pre-release.** `v0.1.0-alpha.2` passed a live Cloud Run / Cloud KMS / GitHub acceptance test of its core exchange, policy and revocation paths. For `v0.2.0`, a tool-assisted security review, local rate-limit boundary and fault-injection tests, dependency and container-provenance checks, and repository security settings are recorded in the [acceptance and release-gate record](docs/acceptance.md); live acceptance of the v0.2 features is recorded there once done. Not done: long-running soak testing and a human third-party security audit. No production deployment is assumed.
 
 A workload sends an OIDC ID token to gsts. gsts verifies it, reads a trust policy from the target repository's default branch, and returns an installation access token. Google service accounts and GitHub Actions are supported.
 

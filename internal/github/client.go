@@ -137,13 +137,36 @@ func (c *Client) CreateToken(ctx context.Context, id int64, jwt string, perms ma
 	}
 	return token, err
 }
-func (c *Client) Policy(ctx context.Context, owner, repo, path, token string) ([]byte, error) {
-	// Omit ref deliberately: GitHub resolves the repository's default branch.
+
+// Head resolves the current head commit of the repository's default branch.
+// Callers pin subsequent Policy reads to the returned SHA.
+func (c *Client) Head(ctx context.Context, owner, repo, token string) (string, error) {
+	// The commit list omits file diffs, so the response stays small for any
+	// commit; the single-commit endpoint would include every patch.
+	var commits []struct {
+		SHA string `json:"sha"`
+	}
+	if err := c.call(ctx, "GET", "/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repo)+"/commits?per_page=1", token, nil, &commits); err != nil {
+		return "", err
+	}
+	if len(commits) != 1 || len(commits[0].SHA) != 40 {
+		return "", errors.New("invalid head commit SHA")
+	}
+	for _, c := range commits[0].SHA {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return "", errors.New("invalid head commit SHA")
+		}
+	}
+	return commits[0].SHA, nil
+}
+
+// Policy reads a file at ref (a commit SHA from Head).
+func (c *Client) Policy(ctx context.Context, owner, repo, path, ref, token string) ([]byte, error) {
 	var content struct {
 		Type, Encoding, Content string
 		Size                    int
 	}
-	err := c.call(ctx, "GET", "/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repo)+"/contents/"+path, token, nil, &content)
+	err := c.call(ctx, "GET", "/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repo)+"/contents/"+path+"?ref="+url.QueryEscape(ref), token, nil, &content)
 	if err != nil {
 		return nil, err
 	}
