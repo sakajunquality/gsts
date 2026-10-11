@@ -42,6 +42,7 @@ Clients should branch on `reason`, not the human-readable `error`. Claim mismatc
 | 400 | `invalid_request` | Invalid body, scope, auth header, or malformed JWT |
 | 401 | `invalid_token` | Disallowed issuer, invalid signature/algorithm, missing identity claims, invalid/expired timestamps |
 | 403 | `audience_not_allowed` | No audience in the service allowlist; rejected before KMS/GitHub |
+| 403 | `token_replayed` | This ID token was already exchanged on this instance and has not expired; rejected before KMS/GitHub |
 | 403 | `scope_not_allowed` | Org allowlist rejection |
 | 403 | `policy_mismatch` | Audience/identity/claim mismatch or excessive requested scope |
 | 403 | `invalid_policy` | Invalid TOML, missing constraints, or invalid permission scope |
@@ -55,6 +56,10 @@ GitHub 422 (for example, the App lacks a requested permission) is an upstream er
 ## GET /live and GET /ready
 
 `/live` reports that the process is serving without contacting dependencies. `/ready` signs a fresh App JWT and authenticates to GitHub, returning 200 or 503. Readiness results are cached for 10 seconds and checks have a 5-second timeout. Use `/live` for startup/liveness, and `/ready` for dependency monitoring. `/healthz` has been removed to avoid Cloud Run's reserved-path conflicts; update existing monitors. See [health probes](health.md).
+
+## Replay protection
+
+Unless `GSTS_REPLAY_PROTECTION=off`, each instance accepts a given ID token (identified by the SHA-256 of the raw JWT) at most once, checked after signature, timestamp and service-audience verification and before any KMS or GitHub call. A client that retries after an ambiguous failure (timeout, dropped response, 5xx) must mint a fresh ID token, because the previous one has been consumed even if the exchange failed. The store is in memory and per instance: it is not shared across Cloud Run instances or restarts, so the same token may still be accepted once by each instance. It holds at most `GSTS_REPLAY_MAX_ENTRIES` live tokens; when full, the entry expiring soonest is evicted instead of rejecting the request, so under extreme load an old token may become replayable once more before it expires.
 
 ## Admission and retry controls
 

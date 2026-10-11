@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -20,6 +21,7 @@ import (
 	"github.com/sakajunquality/gsts/internal/github"
 	"github.com/sakajunquality/gsts/internal/oidc"
 	"github.com/sakajunquality/gsts/internal/policy"
+	"github.com/sakajunquality/gsts/internal/replay"
 )
 
 type Verifier interface {
@@ -37,6 +39,8 @@ type GitHub interface {
 type Server struct {
 	readiness      readinessState
 	admission      admission
+	replayOnce     sync.Once
+	replays        *replay.Store
 	Config         config.Config
 	Verifier       Verifier
 	Signer         AppSigner
@@ -73,7 +77,7 @@ func write(w http.ResponseWriter, status int, value any) {
 }
 func (s *Server) deny(w http.ResponseWriter, log *slog.Logger, status int, reason string, err error) {
 	log.Warn("exchange_denied", "reason", reason, "detail", err)
-	messages := map[string]string{"invalid_request": "invalid request", "invalid_token": "invalid ID token", "policy_mismatch": "access denied", "scope_not_allowed": "scope not allowed", "not_found": "policy or installation not found", "rate_limited": "upstream rate limit", "overloaded": "exchange limit exceeded", "audience_not_allowed": "audience not allowed", "upstream_error": "upstream service unavailable", "invalid_policy": "invalid trust policy"}
+	messages := map[string]string{"invalid_request": "invalid request", "invalid_token": "invalid ID token", "policy_mismatch": "access denied", "scope_not_allowed": "scope not allowed", "not_found": "policy or installation not found", "rate_limited": "upstream rate limit", "overloaded": "exchange limit exceeded", "audience_not_allowed": "audience not allowed", "upstream_error": "upstream service unavailable", "invalid_policy": "invalid trust policy", "token_replayed": "ID token already used"}
 	write(w, status, map[string]string{"error": messages[reason], "reason": reason})
 }
 func (s *Server) upstream(w http.ResponseWriter, log *slog.Logger, err error) {
@@ -92,6 +96,18 @@ func (s *Server) upstream(w http.ResponseWriter, log *slog.Logger, err error) {
 		}
 	}
 	s.deny(w, log, 502, "upstream_error", err)
+}
+
+// replayStore lazily creates the per-instance store, like admission's zero value.
+func (s *Server) replayStore() *replay.Store {
+	s.replayOnce.Do(func() {
+		n := s.Config.ReplayMaxEntries
+		if n <= 0 {
+			n = config.DefaultReplayMaxEntries
+		}
+		s.replays = replay.New(n)
+	})
+	return s.replays
 }
 func (s *Server) revoke(token string) error {
 	// Cleanup must survive cancellation/disconnection of the exchange request.
@@ -160,6 +176,17 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 	if !allowed {
 		s.deny(w, log, 403, "audience_not_allowed", errors.New("audience outside service allowlist"))
 		return
+	}
+	if !s.Config.ReplayDisabled {
+		exp, err := claims.GetExpirationTime()
+		if err != nil || exp == nil {
+			s.deny(w, log, 401, "invalid_token", errors.New("missing expiration"))
+			return
+		}
+		if err := s.replayStore().Consume(auth[1], exp.Time, time.Now()); err != nil {
+			s.deny(w, log, 403, "token_replayed", err)
+			return
+		}
 	}
 	email, _ := claims["email"].(string)
 	log = log.With("email", email, "subject", claims["sub"], "issuer", claims["iss"])

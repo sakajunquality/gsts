@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Separate process liveness (`/live`) from fresh App signing/authentication readiness (`/ready`); remove `/healthz`.
+- Add per-instance, in-memory ID-token replay prevention (`GSTS_REPLAY_PROTECTION`, `GSTS_REPLAY_MAX_ENTRIES`); reused tokens get 403 `token_replayed`.
 - Reject unlisted audiences before KMS/GitHub and bound per-instance exchange concurrency/rate/burst.
 - Add a reusable Node24 GitHub Action with OIDC, masking and post-job token revocation.
 - Add offline `policy validate/test` commands and workflow-reference fixtures.

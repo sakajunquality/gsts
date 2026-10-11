@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -31,7 +32,7 @@ func (v verifierStub) Verify(context.Context, string) (jwt.MapClaims, error) {
 	if aud == "" {
 		aud = "https://gsts.example.com"
 	}
-	return jwt.MapClaims{"iss": config.GoogleIssuer, "sub": "123", "email": "deploy@my-project.iam.gserviceaccount.com", "email_verified": true, "aud": aud}, v.err
+	return jwt.MapClaims{"iss": config.GoogleIssuer, "sub": "123", "email": "deploy@my-project.iam.gserviceaccount.com", "email_verified": true, "aud": aud, "exp": json.Number(strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10))}, v.err
 }
 
 type signerStub struct{ err error }
@@ -251,5 +252,44 @@ func TestHTTPGitHubFlow(t *testing.T) {
 	}
 	if len(calls) != 5 || calls[2] != "GET /repos/org/repo/contents/.github/gsts/deploy.sts.toml" || calls[3] != "DELETE /installation/token" {
 		t.Fatal(calls)
+	}
+}
+
+func exchangeOnce(s *Server, token string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest("POST", "/token", strings.NewReader(`{"scope":"org/repo","identity":"deploy"}`))
+	r.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	return w
+}
+func TestReplayedTokenRejected(t *testing.T) {
+	s, g, logs := fixture()
+	if w := exchangeOnce(s, "same-id-token"); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	calls := len(g.events)
+	w := exchangeOnce(s, "same-id-token")
+	var res struct{ Reason string }
+	_ = json.Unmarshal(w.Body.Bytes(), &res)
+	if w.Code != 403 || res.Reason != "token_replayed" {
+		t.Fatal(w.Code, w.Body)
+	}
+	if len(g.events) != calls {
+		t.Fatal("replay reached GitHub", g.events)
+	}
+	if !strings.Contains(logs.String(), `"reason":"token_replayed"`) || strings.Contains(logs.String(), "same-id-token") {
+		t.Fatal("bad replay audit log")
+	}
+	if w := exchangeOnce(s, "fresh-id-token"); w.Code != 200 {
+		t.Fatal("fresh token rejected", w.Code, w.Body)
+	}
+}
+func TestReplayProtectionOff(t *testing.T) {
+	s, _, _ := fixture()
+	s.Config.ReplayDisabled = true
+	for i := 0; i < 2; i++ {
+		if w := exchangeOnce(s, "same-id-token"); w.Code != 200 {
+			t.Fatal(i, w.Code, w.Body)
+		}
 	}
 }

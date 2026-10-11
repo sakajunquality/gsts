@@ -22,13 +22,15 @@ func ValidName(s string) bool {
 }
 
 const (
-	DefaultMaxConcurrent = 16
-	DefaultExchangeRate  = 60
-	DefaultExchangeBurst = 10
+	DefaultMaxConcurrent    = 16
+	DefaultExchangeRate     = 60
+	DefaultExchangeBurst    = 10
+	DefaultReplayMaxEntries = 100000
 )
 
 type Config struct {
-	MaxConcurrent, ExchangeRate, ExchangeBurst                               int
+	MaxConcurrent, ExchangeRate, ExchangeBurst, ReplayMaxEntries             int
+	ReplayDisabled                                                           bool
 	AppID, Identifier, KeySource, KMSKey, KeyFile, KeyEnv                    string
 	AllowedAudiences, AllowedIssuers, AllowedOrgs                            []string
 	PolicyPrefix, PolicyExtension, OrgPolicyRepo, GitHubURL, LogFormat, Port string
@@ -53,12 +55,20 @@ func Load() (Config, error) {
 		{"GSTS_MAX_CONCURRENT_EXCHANGES", &c.MaxConcurrent, DefaultMaxConcurrent, 10000},
 		{"GSTS_EXCHANGE_RATE_PER_MINUTE", &c.ExchangeRate, DefaultExchangeRate, 1000000},
 		{"GSTS_EXCHANGE_BURST", &c.ExchangeBurst, DefaultExchangeBurst, 1000000},
+		{"GSTS_REPLAY_MAX_ENTRIES", &c.ReplayMaxEntries, DefaultReplayMaxEntries, 10000000},
 	} {
 		n, err := strconv.Atoi(value(setting.name, strconv.Itoa(setting.fallback)))
 		if err != nil || n < 1 || n > setting.maximum {
 			return c, fmt.Errorf("%s must be between 1 and %d", setting.name, setting.maximum)
 		}
 		*setting.target = n
+	}
+	switch value("GSTS_REPLAY_PROTECTION", "on") {
+	case "on":
+	case "off":
+		c.ReplayDisabled = true
+	default:
+		return c, fmt.Errorf("GSTS_REPLAY_PROTECTION must be on or off")
 	}
 	if n, err := strconv.ParseUint(c.AppID, 10, 64); err != nil || n == 0 {
 		return c, fmt.Errorf("GSTS_GITHUB_APP_ID must be a positive integer")

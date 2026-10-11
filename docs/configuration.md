@@ -16,6 +16,8 @@ All settings are environment variables. Invalid configuration prevents startup. 
 | `GSTS_MAX_CONCURRENT_EXCHANGES` | `16` | Positive per-instance in-flight limit (max 10,000) |
 | `GSTS_EXCHANGE_RATE_PER_MINUTE` | `60` | Positive per-instance exchange-attempt rate (max 1,000,000), including denied attempts |
 | `GSTS_EXCHANGE_BURST` | `10` | Positive token-bucket burst capacity (max 1,000,000) |
+| `GSTS_REPLAY_PROTECTION` | `on` | `on` or `off`. When `on`, each ID token is accepted at most once per instance; a second use returns 403 `token_replayed` |
+| `GSTS_REPLAY_MAX_ENTRIES` | `100000` | Positive per-instance capacity of the replay store (max 10,000,000). Each entry is a 32-byte hash plus bookkeeping, held until the token's `exp`. When full, the entry expiring soonest is evicted rather than rejecting the request |
 | `GSTS_ALLOWED_ORGS` | All installed orgs | Comma-separated org allowlist; case-insensitive |
 | `GSTS_POLICY_PATH_PREFIX` | `.github/gsts` | Repository-relative policy directory |
 | `GSTS_POLICY_FILE_EXTENSION` | `.sts.toml` | Policy filename suffix |
@@ -35,6 +37,6 @@ The runtime service account needs `roles/cloudkms.signerVerifier` on the single 
 
 JSON logs contain `exchange_authorized`, `exchange_denied`, and `exchange_success` events. Authenticated identity fields, scope, identity, reason, installation ID, and effective permissions are logged as applicable. Tokens, authorization headers, PEM material, and upstream HTTP bodies are not logged. Restrict log access because email and subject are identity data.
 
-Limits are in-memory and per instance, with no distributed store. Scaling, restarts and new revisions create new budgets. They protect upstream cost, but are not a fleet-wide quota, replay prevention, or tenant fairness. Each successful exchange normally mints two tokens (policy read and caller). See [API controls](api.md#admission-and-retry-controls).
+Limits are in-memory and per instance, with no distributed store. Scaling, restarts and new revisions create new budgets. They protect upstream cost, but are not a fleet-wide quota or tenant fairness. Replay protection is likewise per instance (see [API controls](api.md#replay-protection)). Each successful exchange normally mints two tokens (policy read and caller). See [API controls](api.md#admission-and-retry-controls).
 
 Keep separate Apps, keys and service deployments for each environment. Reuse the [Action](../action/README.md) and [offline policy tools](policy-cli.md) across those deployments. Never broaden one environment's audiences merely to share another environment's identity.
