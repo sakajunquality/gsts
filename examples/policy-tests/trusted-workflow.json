@@ -1,0 +1,79 @@
+{
+  "cases": [
+    {
+      "name": "trusted caller and reusable workflow",
+      "expect": "allow",
+      "claims": {
+        "iss": "https://token.actions.githubusercontent.com",
+        "sub": "repo:example-org/infra:ref:refs/heads/main",
+        "aud": "https://gsts.example.com",
+        "workflow_ref": "example-org/infra/.github/workflows/deploy.yml@refs/heads/main",
+        "job_workflow_ref": "example-org/automation/.github/workflows/deploy.yml@refs/tags/v1"
+      }
+    },
+    {
+      "name": "different caller workflow file",
+      "expect": "deny",
+      "claims": {
+        "iss": "https://token.actions.githubusercontent.com",
+        "sub": "repo:example-org/infra:ref:refs/heads/main",
+        "aud": "https://gsts.example.com",
+        "workflow_ref": "example-org/infra/.github/workflows/untrusted.yml@refs/heads/main",
+        "job_workflow_ref": "example-org/automation/.github/workflows/deploy.yml@refs/tags/v1"
+      }
+    },
+    {
+      "name": "different caller workflow ref",
+      "expect": "deny",
+      "claims": {
+        "iss": "https://token.actions.githubusercontent.com",
+        "sub": "repo:example-org/infra:ref:refs/heads/main",
+        "aud": "https://gsts.example.com",
+        "workflow_ref": "example-org/infra/.github/workflows/deploy.yml@refs/heads/feature",
+        "job_workflow_ref": "example-org/automation/.github/workflows/deploy.yml@refs/tags/v1"
+      }
+    },
+    {
+      "name": "different reusable workflow file",
+      "expect": "deny",
+      "claims": {
+        "iss": "https://token.actions.githubusercontent.com",
+        "sub": "repo:example-org/infra:ref:refs/heads/main",
+        "aud": "https://gsts.example.com",
+        "workflow_ref": "example-org/infra/.github/workflows/deploy.yml@refs/heads/main",
+        "job_workflow_ref": "example-org/automation/.github/workflows/untrusted.yml@refs/tags/v1"
+      }
+    },
+    {
+      "name": "different reusable workflow ref",
+      "expect": "deny",
+      "claims": {
+        "iss": "https://token.actions.githubusercontent.com",
+        "sub": "repo:example-org/infra:ref:refs/heads/main",
+        "aud": "https://gsts.example.com",
+        "workflow_ref": "example-org/infra/.github/workflows/deploy.yml@refs/heads/main",
+        "job_workflow_ref": "example-org/automation/.github/workflows/deploy.yml@refs/heads/main"
+      }
+    },
+    {
+      "name": "missing caller workflow claim",
+      "expect": "deny",
+      "claims": {
+        "iss": "https://token.actions.githubusercontent.com",
+        "sub": "repo:example-org/infra:ref:refs/heads/main",
+        "aud": "https://gsts.example.com",
+        "job_workflow_ref": "example-org/automation/.github/workflows/deploy.yml@refs/tags/v1"
+      }
+    },
+    {
+      "name": "missing reusable workflow claim",
+      "expect": "deny",
+      "claims": {
+        "iss": "https://token.actions.githubusercontent.com",
+        "sub": "repo:example-org/infra:ref:refs/heads/main",
+        "aud": "https://gsts.example.com",
+        "workflow_ref": "example-org/infra/.github/workflows/deploy.yml@refs/heads/main"
+      }
+    }
+  ]
+}

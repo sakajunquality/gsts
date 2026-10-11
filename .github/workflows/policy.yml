@@ -1,0 +1,21 @@
+name: Policy examples
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: go build -o /tmp/gsts ./cmd/gsts
+      - run: /tmp/gsts policy validate --policy examples/policies/org-ci.sts.toml --org
+      - run: /tmp/gsts policy test --policy examples/policies/actions.sts.toml --identifier https://gsts.example.com --fixtures examples/policy-tests/actions.json
+      - run: /tmp/gsts policy test --policy examples/policy-tests/trusted-workflow.sts.toml --identifier https://gsts.example.com --fixtures examples/policy-tests/trusted-workflow.json

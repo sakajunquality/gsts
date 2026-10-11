@@ -17,6 +17,7 @@ import (
 	"github.com/sakajunquality/gsts/internal/github"
 	"github.com/sakajunquality/gsts/internal/kmsimport"
 	"github.com/sakajunquality/gsts/internal/oidc"
+	"github.com/sakajunquality/gsts/internal/policycli"
 	"github.com/sakajunquality/gsts/internal/server"
 	"github.com/sakajunquality/gsts/internal/signing"
 )
@@ -30,12 +31,15 @@ func main() {
 	}
 }
 func run() error {
+	if len(os.Args) > 1 && os.Args[1] == "policy" {
+		return policycli.Run(os.Args[2:], os.Stdout, os.Stderr)
+	}
 	if len(os.Args) == 2 && (os.Args[1] == "version" || os.Args[1] == "--version") {
 		fmt.Println(version)
 		return nil
 	}
 	if len(os.Args) == 2 && (os.Args[1] == "--help" || os.Args[1] == "help") {
-		fmt.Println("Usage: gsts serve | kms-import <CryptoKey> <PEM file> | version")
+		fmt.Println("Usage: gsts serve | kms-import <CryptoKey> <PEM file> | policy validate|test | version")
 		return nil
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -61,7 +65,7 @@ func run() error {
 		return nil
 	}
 	if len(os.Args) != 2 || os.Args[1] != "serve" {
-		return errors.New("usage: gsts serve | kms-import <CryptoKey> <PEM file> | version")
+		return errors.New("usage: gsts serve | kms-import <CryptoKey> <PEM file> | policy validate|test | version")
 	}
 	c, err := config.Load()
 	if err != nil {
@@ -108,7 +112,7 @@ func run() error {
 	app := &signing.AppJWT{Signer: signer, AppID: c.AppID}
 	gh := github.New(c.GitHubURL)
 	// Best effort: a fresh import-only key may not have a version yet. Listen
-	// regardless; /healthz reports signing readiness and recovers after import.
+	// regardless; /ready reports signing readiness and recovers after import.
 	setupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	var appPermissions map[string]string
 	if token, e := app.Token(setupCtx); e == nil {
