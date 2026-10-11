@@ -1,0 +1,31 @@
+name: gsts token
+description: Exchange GitHub Actions OIDC identity for a scoped GitHub App token and revoke it after the job.
+inputs:
+  service-url:
+    description: HTTPS base URL of your environment's gsts service.
+    required: true
+  audience:
+    description: OIDC audience trusted by the gsts policy (defaults to service-url).
+  scope:
+    description: Target organization or organization/repository.
+    required: true
+  identity:
+    description: Policy filename without extension.
+    required: true
+  permissions:
+    description: Optional JSON object of requested permission levels.
+  repositories:
+    description: Optional JSON array of repository names for organization scope.
+  github-api-url:
+    description: HTTPS GitHub API base URL, matching the gsts server configuration.
+    default: https://api.github.com
+outputs:
+  token:
+    description: Masked installation access token, revoked after the job.
+  expires-at:
+    description: Token expiration timestamp.
+runs:
+  using: node24
+  main: main.mjs
+  post: post.mjs
+  post-if: always()
