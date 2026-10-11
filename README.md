@@ -2,7 +2,7 @@
 
 Exchange Google Cloud workload identity for scoped GitHub App installation tokens.
 
-**Status: pre-release.** The local test suite and Terraform validation do not replace a live Cloud Run / KMS / GitHub acceptance test. No published release or production deployment is assumed.
+**Status: pre-release.** `v0.1.0-alpha.2` passed a live Cloud Run / Cloud KMS / GitHub acceptance test of its core exchange, policy and revocation paths ([record](docs/acceptance.md)). Not yet done: an independent security review, rate-limit boundary load testing, KMS/GitHub fault-injection testing and long-running soak testing. The v0.2 features on the development branch (replay prevention, organization trusted issuers, `claim`) have not been live-tested. No production deployment is assumed.
 
 A workload sends an OIDC ID token to gsts. gsts verifies it, reads a trust policy from the target repository's default branch, and returns an installation access token. Google service accounts and GitHub Actions are supported.
 
@@ -83,6 +83,8 @@ The import command uses Application Default Credentials, prints the enabled key 
 - [HTTP API](docs/api.md): request/response formats and stable error reasons.
 - [Configuration](docs/configuration.md): all environment variables.
 - [Design decisions](docs/design.md): compatibility boundaries and adjustments to the initial proposal.
+- [Live acceptance record](docs/acceptance.md): what was and was not verified for `v0.1.0-alpha.2`.
+- [Migrating from sts-cat](docs/migration-sts-cat.md): policy differences and a step-by-step guide.
 - [Security](SECURITY.md): authorization boundaries, operational responsibilities, and disclosure.
 
 Org scope reads policies from the organization's `.github` repository. `repositories` is a **root TOML field** and goes before `[google]`:

@@ -1,6 +1,6 @@
 # Deploy on Google Cloud
 
-This runbook is the live v0.1 acceptance procedure. Complete it in a test project before production. The repository's local checks do not assert that these cloud steps have already run.
+This runbook is the live v0.1 acceptance procedure. Complete it in a test project before production. The repository's local checks do not assert that these cloud steps have already run. See the [acceptance record](acceptance.md) for the live test of `v0.1.0-alpha.2` and what it did not cover.
 
 ## 1. Create the GitHub App
 

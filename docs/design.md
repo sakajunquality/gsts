@@ -27,6 +27,8 @@ The `POST /token` request shape and base TOML names follow [sts-cat](https://git
 - Repository policies cannot grant organization permissions.
 - Google email-only shorthand does not pin an immutable numeric subject unless the policy also specifies one.
 
+See the [sts-cat migration guide](migration-sts-cat.md) for what to change in existing policies.
+
 No source code from sts-cat or octo-sts was copied. Their designs are acknowledged in the README.
 
 ## Known limits / release gate
@@ -35,4 +37,4 @@ Per-instance concurrency and request-rate limits bound exchange attempts before 
 
 No exchange-result idempotency, multi-App routing, GHES validation, custom issuer registration. Replay prevention is per instance only: each instance remembers the SHA-256 of consumed ID tokens in memory until their `exp` (bounded by `GSTS_REPLAY_MAX_ENTRIES`, evicting the soonest-expiring entry when full), so the same token may still be accepted once by each Cloud Run instance, and again after a restart; there is no fleet-wide store. Clients must mint a fresh ID token for every attempt. Policy audience overrides should be reviewed as security-sensitive changes. GitHub rate limits depend on installation/plan and endpoint; a fixed 15,000 requests/hour must not be assumed. Each exchange normally uses four GitHub calls (read-token creation, policy fetch, revocation, caller-token creation), or five when `GSTS_ORG_TRUST_FILE` is set (one more file read for the org trust file), plus installation lookup on a cache miss and best-effort App introspection at startup.
 
-Live Cloud Run acceptance, KMS import/sign permissions, GitHub App behavior, and GHCR publication/visibility must be verified before announcing v0.1. Name availability/trademark checks and an independent security review remain publication tasks; the working repository name does not establish uniqueness or Google affiliation.
+`v0.1.0-alpha.2` passed a live Cloud Run / Cloud KMS / GitHub acceptance test of its core paths ([record](acceptance.md)). Before announcing v0.1, still outstanding: GHCR package visibility, live testing of the v0.2 features (replay prevention, organization trusted issuers, `claim`), rate-limit boundary load testing, KMS/GitHub fault-injection testing and long-running soak testing. Name availability/trademark checks and an independent security review remain publication tasks; the working repository name does not establish uniqueness or Google affiliation.
