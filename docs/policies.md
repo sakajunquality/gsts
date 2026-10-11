@@ -8,7 +8,7 @@ Policies are read from the repository's default branch on every exchange. No pol
 | --- | --- |
 | `issuer` / `issuer_pattern` | Exact issuer / anchored regex. At least one required unless `[google]` is present. |
 | `subject` / `subject_pattern` | Exact `sub` / anchored regex. At least one required unless `[google]` is present. |
-| `audience` / `audience_pattern` | Match at least one nonempty audience; defaults to `GSTS_IDENTIFIER` |
+| `audience` / `audience_pattern` | Match an audience in `GSTS_ALLOWED_AUDIENCES`; defaults to `GSTS_IDENTIFIER` |
 | `claim_pattern` | Map of claim names to regexes. All must match. String, boolean, and numeric scalar claims are supported. |
 | `max_token_lifetime` | Positive upper limit in seconds for `exp - iat`; 0/omission means no extra limit |
 | `[permissions]` | Nonempty permission map, values `read` or `write` |
@@ -79,3 +79,5 @@ Call with `{"scope":"example-org","identity":"ci","repositories":["infra"]}`. Th
 Repository policies cannot authorize organization-wide permissions such as `members` or `organization_secrets`. New/unrecognized permission names require an org policy until their repository scope is reviewed in gsts. An org-level permission remains organization-wide even if `repositories` narrows repository access. Protect org policy write access accordingly.
 
 The GitHub App must have `contents:read` to load policies, plus every permission a policy can grant. At startup, gsts tries to read the App permission set and logs a warning when a policy exceeds it. Failure to fetch this diagnostic snapshot does not prevent bootstrap. GitHub remains authoritative and may reject token issuance with 422. This check does not discover or pre-read every policy in the organization.
+
+Before deploying policies, run the [offline validate/test CLI](policy-cli.md) in repository CI. Custom audience policies also require a matching entry in the service's `GSTS_ALLOWED_AUDIENCES`.

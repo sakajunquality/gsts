@@ -1,6 +1,6 @@
 # Server configuration
 
-All settings are environment variables. Invalid configuration prevents startup. An unavailable KMS version does not prevent the server from listening; signing readiness is reported by `/healthz`.
+All settings are environment variables. Invalid configuration prevents startup. An unavailable KMS version does not prevent the server from listening; dependency readiness is reported by `/ready`; `/live` remains available for bootstrap.
 
 | Variable | Default / required | Meaning |
 | --- | --- | --- |
@@ -12,6 +12,10 @@ All settings are environment variables. Invalid configuration prevents startup. 
 | `GSTS_KEY_ENV` | Required for `env` | **Name** of the environment variable containing PEM |
 | `GSTS_ALLOW_INSECURE_KEY` | Disabled | Exactly `1` enables local file/env keys; never set in production |
 | `GSTS_ALLOWED_ISSUERS` | Google + GitHub Actions | Comma-separated exact issuer URLs; only these two built-in issuers are supported |
+| `GSTS_ALLOWED_AUDIENCES` | `GSTS_IDENTIFIER` | Comma-separated exact audience allowlist before KMS/GitHub; policy matching still applies |
+| `GSTS_MAX_CONCURRENT_EXCHANGES` | `16` | Positive per-instance in-flight limit (max 10,000) |
+| `GSTS_EXCHANGE_RATE_PER_MINUTE` | `60` | Positive per-instance exchange-attempt rate (max 1,000,000), including denied attempts |
+| `GSTS_EXCHANGE_BURST` | `10` | Positive token-bucket burst capacity (max 1,000,000) |
 | `GSTS_ALLOWED_ORGS` | All installed orgs | Comma-separated org allowlist; case-insensitive |
 | `GSTS_POLICY_PATH_PREFIX` | `.github/gsts` | Repository-relative policy directory |
 | `GSTS_POLICY_FILE_EXTENSION` | `.sts.toml` | Policy filename suffix |
@@ -30,3 +34,7 @@ An empty optional environment variable uses its default. Remove an issuer by pro
 The runtime service account needs `roles/cloudkms.signerVerifier` on the single signing CryptoKey. It does not need import/admin roles. The person importing the key needs separate KMS import-job creation/read, CryptoKey read, key-version import/read permissions and ADC. Enable the Cloud Run and KMS APIs before Terraform.
 
 JSON logs contain `exchange_authorized`, `exchange_denied`, and `exchange_success` events. Authenticated identity fields, scope, identity, reason, installation ID, and effective permissions are logged as applicable. Tokens, authorization headers, PEM material, and upstream HTTP bodies are not logged. Restrict log access because email and subject are identity data.
+
+Limits are in-memory and per instance, with no distributed store. Scaling, restarts and new revisions create new budgets. They protect upstream cost, but are not a fleet-wide quota, replay prevention, or tenant fairness. Each successful exchange normally mints two tokens (policy read and caller). See [API controls](api.md#admission-and-retry-controls).
+
+Keep separate Apps, keys and service deployments for each environment. Reuse the [Action](../action/README.md) and [offline policy tools](policy-cli.md) across those deployments. Never broaden one environment's audiences merely to share another environment's identity.

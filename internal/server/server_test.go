@@ -129,7 +129,7 @@ func TestExchangeFailures(t *testing.T) {
 	}{
 		{"signature", func(s *Server, g *githubStub) { s.Verifier = verifierStub{err: errors.New("bad signature")} }, "", 401, "invalid_token", false},
 		{"malformed JWT", func(s *Server, g *githubStub) { s.Verifier = verifierStub{err: oidc.ErrMalformed} }, "", 400, "invalid_request", false},
-		{"wrong audience", func(s *Server, g *githubStub) { s.Verifier = verifierStub{aud: "elsewhere"} }, "", 403, "policy_mismatch", true},
+		{"wrong audience", func(s *Server, g *githubStub) { s.Verifier = verifierStub{aud: "elsewhere"} }, "", 403, "audience_not_allowed", false},
 		{"missing policy", func(s *Server, g *githubStub) { g.fetchErr = &github.APIError{Status: 404} }, "", 404, "not_found", true},
 		{"fetch failure", func(s *Server, g *githubStub) { g.fetchErr = errors.New("upstream") }, "", 502, "upstream_error", true},
 		{"revoke failure", func(s *Server, g *githubStub) { g.revokeErr = errors.New("failed revoke") }, "", 502, "upstream_error", true},

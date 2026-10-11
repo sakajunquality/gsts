@@ -30,13 +30,17 @@ resource "google_kms_crypto_key_iam_member" "signer" {
 locals {
   kms_key_version = "${google_kms_crypto_key.gsts.id}/cryptoKeyVersions/${var.kms_key_version_number}"
   environment = {
-    GSTS_GITHUB_APP_ID   = var.github_app_id
-    GSTS_IDENTIFIER      = var.identifier
-    GSTS_KEY_SOURCE      = "kms"
-    GSTS_KMS_KEY         = local.kms_key_version
-    GSTS_ALLOWED_ORGS    = join(",", var.allowed_orgs)
-    GSTS_ALLOWED_ISSUERS = join(",", var.allowed_issuers)
-    GSTS_LOG_FORMAT      = "json"
+    GSTS_GITHUB_APP_ID            = var.github_app_id
+    GSTS_IDENTIFIER               = var.identifier
+    GSTS_KEY_SOURCE               = "kms"
+    GSTS_KMS_KEY                  = local.kms_key_version
+    GSTS_ALLOWED_ORGS             = join(",", var.allowed_orgs)
+    GSTS_ALLOWED_ISSUERS          = join(",", var.allowed_issuers)
+    GSTS_LOG_FORMAT               = "json"
+    GSTS_ALLOWED_AUDIENCES        = join(",", var.allowed_audiences)
+    GSTS_MAX_CONCURRENT_EXCHANGES = tostring(var.max_concurrent_exchanges)
+    GSTS_EXCHANGE_RATE_PER_MINUTE = tostring(var.exchange_rate_per_minute)
+    GSTS_EXCHANGE_BURST           = tostring(var.exchange_burst)
   }
 }
 resource "google_cloud_run_v2_service" "gsts" {
