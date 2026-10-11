@@ -7,7 +7,7 @@ The initial September 2026 proposal is implemented as an independent Go service 
 - RS256, required `iss` / `sub` / `aud` / numeric `iat` / numeric `exp`, and optional `nbf`. Timestamps must be integer Unix seconds in years 1970–9999; this prevents numeric overflow in date conversion. No timestamp leeway; keep clocks synchronized. Identity/signature/time validation precedes GitHub access. A service audience allowlist is checked before signing/GitHub access. After policy loading, the policy must match an audience in the admitted intersection. No caller token is issued before both stages succeed.
 - GitHub installation IDs are cached for ten minutes, at most 1,000 orgs per process. Policies and returned tokens are never cached. A stale installation ID can cause failures until cache expiry after uninstall/reinstall.
 - App JWT `iat` is backdated by 60 seconds and `exp` is nine minutes ahead (ten minutes from `iat`). Cache refresh is after eight minutes, leaving one minute before expiry. This resolves the proposal's conflicting “one KMS call per exchange” / “nine-minute cache” statements. Concurrent callers share a single signing operation.
-- Read tokens have `contents:read` on exactly the policy repository and are revoked immediately after fetching the policy, before caller-token issuance. Cleanup uses an independent ten-second context even when the caller disconnects. Revocation failures fail the exchange. Remote outages/process termination can still prevent revocation; those tokens expire according to GitHub's lifetime.
+- Read tokens have `contents:read` on exactly the policy repository (plus the org policy repository when `GSTS_ORG_TRUST_FILE` is set) and are revoked immediately after fetching the policy, before caller-token issuance. Cleanup uses an independent ten-second context even when the caller disconnects. Revocation failures fail the exchange. Remote outages/process termination can still prevent revocation; those tokens expire according to GitHub's lifetime.
 - Request narrowing ships immediately. Empty permissions/repository constraints are rejected instead of turning into GitHub's default full installation scope. Org permissions require org policies; repository policies cannot widen authority to the organization.
 - KMS import uses Google's Go SDK, RSA-OAEP-SHA256 to wrap an ephemeral AES-256 key, and Tink RFC 5649 KWP to wrap the PKCS#8 material. No custom AES or RSA implementation. KMS signing includes CRC32C request/response integrity checks.
 - Startup App-permission introspection is best effort, not readiness. It supplies warning logs when available; GitHub's issuance API is authoritative.
@@ -21,10 +21,13 @@ The `POST /token` request shape and base TOML names follow [sts-cat](https://git
 - Regexes use Go RE2 rather than Rust regex syntax.
 - Lifetime limits use required `iat` (`exp - iat`), not `nbf` fallback.
 - Unknown policy keys are rejected.
+- The exact-match `claim` table is a gsts extension not present in sts-cat; policies using it are not portable back.
 - Built-in issuer support is intentionally limited.
 - Empty repository lists and empty permission maps are denied.
 - Repository policies cannot grant organization permissions.
 - Google email-only shorthand does not pin an immutable numeric subject unless the policy also specifies one.
+
+See the [sts-cat migration guide](migration-sts-cat.md) for what to change in existing policies.
 
 No source code from sts-cat or octo-sts was copied. Their designs are acknowledged in the README.
 
@@ -32,6 +35,6 @@ No source code from sts-cat or octo-sts was copied. Their designs are acknowledg
 
 Per-instance concurrency and request-rate limits bound exchange attempts before OIDC work. These do not provide per-tenant fairness or a distributed quota.
 
-No replay store, exchange-result idempotency, multi-App routing, GHES validation, custom issuer registration. A valid ID token can be replayed until it expires. Policy audience overrides should be reviewed as security-sensitive changes. GitHub rate limits depend on installation/plan and endpoint; a fixed 15,000 requests/hour must not be assumed. Each exchange normally uses four GitHub calls (read-token creation, policy fetch, revocation, caller-token creation), plus installation lookup on a cache miss and best-effort App introspection at startup.
+No exchange-result idempotency, multi-App routing, GHES validation, custom issuer registration. Replay prevention is per instance only: each instance remembers a hash of the decoded segments of consumed ID tokens in memory until their `exp` (bounded by `GSTS_REPLAY_MAX_ENTRIES`; a full store refuses exchanges rather than evicting live entries), so the same token may still be accepted once by each Cloud Run instance, and again after a restart; there is no fleet-wide store. Clients must mint a fresh ID token for every attempt. Policy audience overrides should be reviewed as security-sensitive changes. GitHub rate limits depend on installation/plan and endpoint; a fixed 15,000 requests/hour must not be assumed. Each exchange normally uses four GitHub calls (read-token creation, policy fetch, revocation, caller-token creation), or five when `GSTS_ORG_TRUST_FILE` is set (one more file read for the org trust file), plus installation lookup on a cache miss and best-effort App introspection at startup.
 
-Live Cloud Run acceptance, KMS import/sign permissions, GitHub App behavior, and GHCR publication/visibility must be verified before announcing v0.1. Name availability/trademark checks and an independent security review remain publication tasks; the working repository name does not establish uniqueness or Google affiliation.
+`v0.1.0-alpha.2` passed a live Cloud Run / Cloud KMS / GitHub acceptance test of its core paths ([record](acceptance.md)). Before announcing v0.1, still outstanding: GHCR package visibility, live testing of the v0.2 features (replay prevention, organization trusted issuers, `claim`), rate-limit boundary load testing, KMS/GitHub fault-injection testing and long-running soak testing. Name availability/trademark checks and an independent security review remain publication tasks; the working repository name does not establish uniqueness or Google affiliation.

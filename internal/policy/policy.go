@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -20,13 +21,16 @@ type Google struct {
 	Project               string `toml:"project"`
 }
 type Policy struct {
-	Issuer           string            `toml:"issuer"`
-	IssuerPattern    string            `toml:"issuer_pattern"`
-	Subject          string            `toml:"subject"`
-	SubjectPattern   string            `toml:"subject_pattern"`
-	Audience         string            `toml:"audience"`
-	AudiencePattern  string            `toml:"audience_pattern"`
-	ClaimPattern     map[string]string `toml:"claim_pattern"`
+	Issuer          string            `toml:"issuer"`
+	IssuerPattern   string            `toml:"issuer_pattern"`
+	Subject         string            `toml:"subject"`
+	SubjectPattern  string            `toml:"subject_pattern"`
+	Audience        string            `toml:"audience"`
+	AudiencePattern string            `toml:"audience_pattern"`
+	ClaimPattern    map[string]string `toml:"claim_pattern"`
+	// Claim holds exact-match claims. Parse guarantees every value is a
+	// string, int64 or bool.
+	Claim            map[string]any    `toml:"claim"`
 	MaxTokenLifetime int64             `toml:"max_token_lifetime"`
 	Permissions      map[string]string `toml:"permissions"`
 	Repositories     []string          `toml:"repositories"`
@@ -43,6 +47,21 @@ func Parse(b []byte, org bool) (*Policy, error) {
 	}
 	if p.MaxTokenLifetime < 0 {
 		return nil, fmt.Errorf("negative max_token_lifetime")
+	}
+	if p.Claim != nil {
+		if len(p.Claim) == 0 {
+			return nil, fmt.Errorf("empty claim is ambiguous; omit it instead")
+		}
+		for k, v := range p.Claim {
+			if k == "" {
+				return nil, fmt.Errorf("empty claim name")
+			}
+			switch v.(type) {
+			case string, int64, bool:
+			default:
+				return nil, fmt.Errorf("claim %s: claim values must be strings, integers or booleans", k)
+			}
+		}
 	}
 	patterns := []string{p.IssuerPattern, p.SubjectPattern, p.AudiencePattern}
 	for _, v := range p.ClaimPattern {
@@ -108,6 +127,27 @@ func matches(v, exact, pattern string) bool {
 	return true
 }
 
+// claimEquals is strict: types never coerce, and missing or non-scalar claims
+// never match. Numeric claims (json.Number) match only integer policy values.
+func claimEquals(got, want any) bool {
+	switch w := want.(type) {
+	case string:
+		g, ok := got.(string)
+		return ok && g == w
+	case bool:
+		g, ok := got.(bool)
+		return ok && g == w
+	case int64:
+		n, ok := got.(json.Number)
+		if !ok {
+			return false
+		}
+		g, err := strconv.ParseInt(n.String(), 10, 64)
+		return err == nil && g == w
+	}
+	return false
+}
+
 // Evaluate only accepts claims whose signature and timestamps have been verified.
 func (p *Policy) Evaluate(c jwt.MapClaims, identifier string) error {
 	iss, _ := c["iss"].(string)
@@ -145,6 +185,11 @@ func (p *Policy) Evaluate(c jwt.MapClaims, identifier string) error {
 		}
 		if !matches(email, g.ServiceAccount, pattern) {
 			return fmt.Errorf("Google account mismatch")
+		}
+	}
+	for k, want := range p.Claim {
+		if !claimEquals(c[k], want) {
+			return fmt.Errorf("claim %s mismatch", k)
 		}
 	}
 	for k, pattern := range p.ClaimPattern {

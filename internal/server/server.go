@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -20,6 +21,7 @@ import (
 	"github.com/sakajunquality/gsts/internal/github"
 	"github.com/sakajunquality/gsts/internal/oidc"
 	"github.com/sakajunquality/gsts/internal/policy"
+	"github.com/sakajunquality/gsts/internal/replay"
 )
 
 type Verifier interface {
@@ -37,6 +39,8 @@ type GitHub interface {
 type Server struct {
 	readiness      readinessState
 	admission      admission
+	replayOnce     sync.Once
+	replays        *replay.Store
 	Config         config.Config
 	Verifier       Verifier
 	Signer         AppSigner
@@ -73,7 +77,7 @@ func write(w http.ResponseWriter, status int, value any) {
 }
 func (s *Server) deny(w http.ResponseWriter, log *slog.Logger, status int, reason string, err error) {
 	log.Warn("exchange_denied", "reason", reason, "detail", err)
-	messages := map[string]string{"invalid_request": "invalid request", "invalid_token": "invalid ID token", "policy_mismatch": "access denied", "scope_not_allowed": "scope not allowed", "not_found": "policy or installation not found", "rate_limited": "upstream rate limit", "overloaded": "exchange limit exceeded", "audience_not_allowed": "audience not allowed", "upstream_error": "upstream service unavailable", "invalid_policy": "invalid trust policy"}
+	messages := map[string]string{"invalid_request": "invalid request", "invalid_token": "invalid ID token", "policy_mismatch": "access denied", "scope_not_allowed": "scope not allowed", "not_found": "policy or installation not found", "rate_limited": "upstream rate limit", "overloaded": "exchange limit exceeded", "audience_not_allowed": "audience not allowed", "upstream_error": "upstream service unavailable", "invalid_policy": "invalid trust policy", "token_replayed": "ID token already used", "issuer_not_trusted": "issuer not trusted by organization"}
 	write(w, status, map[string]string{"error": messages[reason], "reason": reason})
 }
 func (s *Server) upstream(w http.ResponseWriter, log *slog.Logger, err error) {
@@ -92,6 +96,18 @@ func (s *Server) upstream(w http.ResponseWriter, log *slog.Logger, err error) {
 		}
 	}
 	s.deny(w, log, 502, "upstream_error", err)
+}
+
+// replayStore lazily creates the per-instance store, like admission's zero value.
+func (s *Server) replayStore() *replay.Store {
+	s.replayOnce.Do(func() {
+		n := s.Config.ReplayMaxEntries
+		if n <= 0 {
+			n = config.DefaultReplayMaxEntries
+		}
+		s.replays = replay.New(n)
+	})
+	return s.replays
 }
 func (s *Server) revoke(token string) error {
 	// Cleanup must survive cancellation/disconnection of the exchange request.
@@ -161,6 +177,27 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 		s.deny(w, log, 403, "audience_not_allowed", errors.New("audience outside service allowlist"))
 		return
 	}
+	if !s.Config.ReplayDisabled {
+		exp, err := claims.GetExpirationTime()
+		if err != nil || exp == nil {
+			s.deny(w, log, 401, "invalid_token", errors.New("missing expiration"))
+			return
+		}
+		switch err := s.replayStore().Consume(auth[1], exp.Time, time.Now()); {
+		case errors.Is(err, replay.ErrReplayed):
+			s.deny(w, log, 403, "token_replayed", err)
+			return
+		case errors.Is(err, replay.ErrExpired):
+			s.deny(w, log, 401, "invalid_token", err)
+			return
+		case errors.Is(err, replay.ErrFull):
+			// Evicting a live entry would make that token replayable; refuse
+			// instead. The store only fills when exchanges outpace expiry.
+			w.Header().Set("Retry-After", "60")
+			s.deny(w, log, 429, "overloaded", err)
+			return
+		}
+	}
 	email, _ := claims["email"].(string)
 	log = log.With("email", email, "subject", claims["sub"], "issuer", claims["iss"])
 	finish = stage(log, "sign_app_jwt")
@@ -181,18 +218,45 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 	if repo == "" {
 		policyRepo = s.Config.OrgPolicyRepo
 	}
+	// One read token covers the identity policy and, when enabled, the org
+	// trust file. For org scope both live in the same repository.
+	trustEnabled := s.Config.OrgTrustFile != ""
+	readRepos := []string{policyRepo}
+	if trustEnabled && policyRepo != s.Config.OrgPolicyRepo {
+		readRepos = append(readRepos, s.Config.OrgPolicyRepo)
+	}
 	finish = stage(log, "create_policy_token")
-	readToken, err := s.GitHub.CreateToken(ctx, id, appJWT, map[string]string{"contents": "read"}, []string{policyRepo})
+	readToken, err := s.GitHub.CreateToken(ctx, id, appJWT, map[string]string{"contents": "read"}, readRepos)
 	finish(err)
+	// No fallback when the org policy repository is missing or not installed:
+	// a status code cannot prove the organization has no trust file, so the
+	// exchange fails closed (upstream_error / not_found) instead.
 	if err != nil {
 		s.upstream(w, log, err)
 		return
 	}
 	policyPath := s.Config.PolicyPrefix + "/" + req.Identity + s.Config.PolicyExtension
 	log = log.With("policy_repository", owner+"/"+policyRepo, "policy_path", policyPath)
-	finish = stage(log, "fetch_policy")
-	data, fetchErr := s.GitHub.Policy(ctx, owner, policyRepo, policyPath, readToken.Token)
-	finish(fetchErr)
+	var trustData []byte
+	trustFound := false
+	var trustErr, fetchErr error
+	var data []byte
+	if trustEnabled {
+		finish = stage(log, "fetch_org_trust")
+		trustData, trustErr = s.GitHub.Policy(ctx, owner, s.Config.OrgPolicyRepo, s.Config.OrgTrustFile, readToken.Token)
+		finish(trustErr)
+		if github.IsNotFound(trustErr) {
+			// No trust file: the organization has not opted in.
+			trustData, trustErr = nil, nil
+		} else if trustErr == nil {
+			trustFound = true
+		}
+	}
+	if trustErr == nil {
+		finish = stage(log, "fetch_policy")
+		data, fetchErr = s.GitHub.Policy(ctx, owner, policyRepo, policyPath, readToken.Token)
+		finish(fetchErr)
+	}
 	// Revoke before minting the caller's token: cleanup failure cannot orphan a
 	// privileged token that was never delivered to its caller.
 	finish = stage(log, "revoke_policy_token")
@@ -202,9 +266,27 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 		s.upstream(w, log, err)
 		return
 	}
+	if trustErr != nil {
+		s.upstream(w, log, trustErr)
+		return
+	}
 	if fetchErr != nil {
 		s.upstream(w, log, fetchErr)
 		return
+	}
+	if trustFound {
+		log = log.With("org_trust_repository", owner+"/"+s.Config.OrgPolicyRepo, "org_trust_path", s.Config.OrgTrustFile, "org_trust_sha256", fmt.Sprintf("%x", sha256.Sum256(trustData)))
+		finish = stage(log, "parse_org_trust")
+		trust, err := policy.ParseTrust(trustData)
+		finish(err)
+		if err != nil {
+			s.deny(w, log, 403, "invalid_policy", err)
+			return
+		}
+		if iss, _ := claims["iss"].(string); !trust.Allows(iss) {
+			s.deny(w, log, 403, "issuer_not_trusted", errors.New("issuer not allowed by organization trust file"))
+			return
+		}
 	}
 	log = log.With("policy_sha256", fmt.Sprintf("%x", sha256.Sum256(data)))
 	finish = stage(log, "parse_policy")

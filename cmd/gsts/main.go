@@ -39,7 +39,7 @@ func run() error {
 		return nil
 	}
 	if len(os.Args) == 2 && (os.Args[1] == "--help" || os.Args[1] == "help") {
-		fmt.Println("Usage: gsts serve | kms-import <CryptoKey> <PEM file> | policy validate|test | version")
+		fmt.Println("Usage: gsts serve | kms-import <CryptoKey> <PEM file> | policy validate|validate-trust|test | version")
 		return nil
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -65,7 +65,7 @@ func run() error {
 		return nil
 	}
 	if len(os.Args) != 2 || os.Args[1] != "serve" {
-		return errors.New("usage: gsts serve | kms-import <CryptoKey> <PEM file> | policy validate|test | version")
+		return errors.New("usage: gsts serve | kms-import <CryptoKey> <PEM file> | policy validate|validate-trust|test | version")
 	}
 	c, err := config.Load()
 	if err != nil {

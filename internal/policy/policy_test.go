@@ -152,8 +152,110 @@ func TestExamples(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if strings.HasSuffix(path, "trusted-issuers.toml") {
+			if _, err = ParseTrust(b); err != nil {
+				t.Fatalf("%s: %v", path, err)
+			}
+			continue
+		}
 		if _, err = Parse(b, strings.Contains(path, "org-")); err != nil {
 			t.Fatalf("%s: %v", path, err)
 		}
 	}
+}
+
+func claimPolicy(t *testing.T, extra string) *Policy {
+	t.Helper()
+	p, err := Parse([]byte("issuer = 'https://i'\nsubject = 's'\n"+extra+"\n[permissions]\ncontents = 'read'\n"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestClaimExactMatch(t *testing.T) {
+	base := func(k string, v any) jwt.MapClaims {
+		c := jwt.MapClaims{"iss": "https://i", "sub": "s", "aud": "a"}
+		if v != nil {
+			c[k] = v
+		}
+		return c
+	}
+	tests := []struct {
+		name   string
+		policy string
+		value  any
+		deny   bool
+	}{
+		{"string ok", `claim = { x = "123" }`, "123", false},
+		{"string mismatch", `claim = { x = "123" }`, "124", true},
+		{"string prefix mismatch", `claim = { x = "123" }`, "1234", true},
+		{"string policy vs number claim", `claim = { x = "123" }`, json.Number("123"), true},
+		{"int ok", `claim = { x = 123 }`, json.Number("123"), false},
+		{"int mismatch", `claim = { x = 123 }`, json.Number("124"), true},
+		{"int vs float claim", `claim = { x = 123 }`, json.Number("123.5"), true},
+		{"int vs float-form claim", `claim = { x = 123 }`, json.Number("123.0"), true},
+		{"int vs string claim", `claim = { x = 123 }`, "123", true},
+		{"bool true ok", `claim = { x = true }`, true, false},
+		{"bool false ok", `claim = { x = false }`, false, false},
+		{"bool mismatch", `claim = { x = true }`, false, true},
+		{"bool vs string claim", `claim = { x = true }`, "true", true},
+		{"missing claim", `claim = { x = "1" }`, nil, true},
+		{"array claim", `claim = { x = "1" }`, []any{"1"}, true},
+		{"object claim", `claim = { x = "1" }`, map[string]any{"a": "1"}, true},
+		{"both exact and pattern ok", "claim = { x = \"123\" }\nclaim_pattern = { x = '12.' }", "123", false},
+		{"exact ok pattern fails", "claim = { x = \"123\" }\nclaim_pattern = { x = '9.*' }", "123", true},
+		{"pattern ok exact fails", "claim = { x = \"123\" }\nclaim_pattern = { x = '12.' }", "124", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := claimPolicy(t, tc.policy).Evaluate(base("x", tc.value), "a")
+			if (err != nil) != tc.deny {
+				t.Fatalf("error=%v", err)
+			}
+			if err != nil && strings.Contains(err.Error(), "123") {
+				t.Fatalf("error leaks claim value: %v", err)
+			}
+		})
+	}
+}
+
+func TestClaimAllEntriesRequired(t *testing.T) {
+	p := claimPolicy(t, `claim = { a = "1", b = 2 }`)
+	c := jwt.MapClaims{"iss": "https://i", "sub": "s", "aud": "a", "a": "1", "b": json.Number("2")}
+	if err := p.Evaluate(c, "a"); err != nil {
+		t.Fatal(err)
+	}
+	c["b"] = json.Number("3")
+	if err := p.Evaluate(c, "a"); err == nil {
+		t.Fatal("expected mismatch")
+	}
+}
+
+func TestClaimParseValidation(t *testing.T) {
+	for name, extra := range map[string]string{
+		"float":        `claim = { x = 1.5 }`,
+		"empty table":  `claim = {}`,
+		"empty key":    `claim = { "" = "v" }`,
+		"array":        `claim = { x = ["a"] }`,
+		"nested table": "[claim.x]\ny = 'z'",
+		"datetime":     `claim = { x = 2020-01-01T00:00:00Z }`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			src := "issuer = 'https://i'\nsubject = 's'\n"
+			if strings.HasPrefix(extra, "[") {
+				src += "[permissions]\ncontents = 'read'\n" + extra
+			} else {
+				src += extra + "\n[permissions]\ncontents = 'read'\n"
+			}
+			if _, err := Parse([]byte(src), false); err == nil {
+				t.Fatal("expected error")
+			}
+		})
+	}
+	_, err := Parse([]byte("issuer='i'\nsubject='s'\nclaim={x=1.5}\n[permissions]\ncontents='read'\n"), false)
+	if err == nil || !strings.Contains(err.Error(), "claim values must be strings, integers or booleans") {
+		t.Fatalf("error=%v", err)
+	}
+	claimPolicy(t, "[claim]\nx = 'a'\ny = 1\nz = true")
 }

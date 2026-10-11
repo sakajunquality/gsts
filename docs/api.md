@@ -42,11 +42,13 @@ Clients should branch on `reason`, not the human-readable `error`. Claim mismatc
 | 400 | `invalid_request` | Invalid body, scope, auth header, or malformed JWT |
 | 401 | `invalid_token` | Disallowed issuer, invalid signature/algorithm, missing identity claims, invalid/expired timestamps |
 | 403 | `audience_not_allowed` | No audience in the service allowlist; rejected before KMS/GitHub |
+| 403 | `token_replayed` | This ID token was already used in an exchange attempt on this instance (including attempts that failed after verification) and has not expired; rejected before KMS/GitHub |
 | 403 | `scope_not_allowed` | Org allowlist rejection |
 | 403 | `policy_mismatch` | Audience/identity/claim mismatch or excessive requested scope |
-| 403 | `invalid_policy` | Invalid TOML, missing constraints, or invalid permission scope |
+| 403 | `invalid_policy` | Invalid TOML, missing constraints, or invalid permission scope; also an invalid [organization trust file](policies.md#organization-trusted-issuers) |
+| 403 | `issuer_not_trusted` | `GSTS_ORG_TRUST_FILE` is enabled and the organization's trust file does not allow the token's issuer |
 | 404 | `not_found` | Installation or policy lookup returned 404 |
-| 429 | `overloaded` | Local concurrency or request-rate limit |
+| 429 | `overloaded` | Local concurrency or request-rate limit, or the replay store is full |
 | 429 | `rate_limited` | GitHub primary or secondary rate limit |
 | 502 | `upstream_error` | GitHub, OIDC provider, or KMS failure; includes temporary-token revocation failure |
 
@@ -55,6 +57,10 @@ GitHub 422 (for example, the App lacks a requested permission) is an upstream er
 ## GET /live and GET /ready
 
 `/live` reports that the process is serving without contacting dependencies. `/ready` signs a fresh App JWT and authenticates to GitHub, returning 200 or 503. Readiness results are cached for 10 seconds and checks have a 5-second timeout. Use `/live` for startup/liveness, and `/ready` for dependency monitoring. `/healthz` has been removed to avoid Cloud Run's reserved-path conflicts; update existing monitors. See [health probes](health.md).
+
+## Replay protection
+
+Unless `GSTS_REPLAY_PROTECTION=off`, each instance accepts a given ID token (identified by a SHA-256 over its decoded header, payload and signature bytes, so re-encoding the signature does not yield a new token) at most once, checked after signature, timestamp and service-audience verification and before any KMS or GitHub call. A client that retries after an ambiguous failure (timeout, dropped response, 5xx) must mint a fresh ID token, because the previous one has been consumed even if the exchange failed. The store is in memory and per instance: it is not shared across Cloud Run instances or restarts, so the same token may still be accepted once by each instance. It holds at most `GSTS_REPLAY_MAX_ENTRIES` live tokens; when full, exchanges are refused with 429 `overloaded` and `Retry-After` until entries expire, because evicting a live entry would make that token replayable. A token that expires between verification and the replay check is rejected with 401 `invalid_token`.
 
 ## Admission and retry controls
 
