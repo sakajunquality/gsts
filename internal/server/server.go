@@ -98,11 +98,6 @@ func (s *Server) upstream(w http.ResponseWriter, log *slog.Logger, err error) {
 	s.deny(w, log, 502, "upstream_error", err)
 }
 
-func isUnprocessable(err error) bool {
-	var e *github.APIError
-	return errors.As(err, &e) && e.Status == 422
-}
-
 // replayStore lazily creates the per-instance store, like admission's zero value.
 func (s *Server) replayStore() *replay.Store {
 	s.replayOnce.Do(func() {
@@ -188,8 +183,18 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 			s.deny(w, log, 401, "invalid_token", errors.New("missing expiration"))
 			return
 		}
-		if err := s.replayStore().Consume(auth[1], exp.Time, time.Now()); err != nil {
+		switch err := s.replayStore().Consume(auth[1], exp.Time, time.Now()); {
+		case errors.Is(err, replay.ErrReplayed):
 			s.deny(w, log, 403, "token_replayed", err)
+			return
+		case errors.Is(err, replay.ErrExpired):
+			s.deny(w, log, 401, "invalid_token", err)
+			return
+		case errors.Is(err, replay.ErrFull):
+			// Evicting a live entry would make that token replayable; refuse
+			// instead. The store only fills when exchanges outpace expiry.
+			w.Header().Set("Retry-After", "60")
+			s.deny(w, log, 429, "overloaded", err)
 			return
 		}
 	}
@@ -223,14 +228,9 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 	finish = stage(log, "create_policy_token")
 	readToken, err := s.GitHub.CreateToken(ctx, id, appJWT, map[string]string{"contents": "read"}, readRepos)
 	finish(err)
-	if err != nil && len(readRepos) == 2 && (github.IsNotFound(err) || isUnprocessable(err)) {
-		// The org policy repository is missing or not accessible to the App, so
-		// the org cannot have opted in; retry for the policy repository alone.
-		trustEnabled = false
-		finish = stage(log, "create_policy_token")
-		readToken, err = s.GitHub.CreateToken(ctx, id, appJWT, map[string]string{"contents": "read"}, readRepos[:1])
-		finish(err)
-	}
+	// No fallback when the org policy repository is missing or not installed:
+	// a status code cannot prove the organization has no trust file, so the
+	// exchange fails closed (upstream_error / not_found) instead.
 	if err != nil {
 		s.upstream(w, log, err)
 		return

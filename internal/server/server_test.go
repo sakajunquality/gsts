@@ -24,9 +24,10 @@ import (
 )
 
 type verifierStub struct {
-	err error
-	aud string
-	iss string
+	err     error
+	aud     string
+	iss     string
+	expired bool
 }
 
 func (v verifierStub) Verify(context.Context, string) (jwt.MapClaims, error) {
@@ -38,7 +39,11 @@ func (v verifierStub) Verify(context.Context, string) (jwt.MapClaims, error) {
 	if iss == "" {
 		iss = config.GoogleIssuer
 	}
-	return jwt.MapClaims{"iss": iss, "sub": "123", "email": "deploy@my-project.iam.gserviceaccount.com", "email_verified": true, "aud": aud, "exp": json.Number(strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10))}, v.err
+	exp := time.Now().Add(time.Hour)
+	if v.expired {
+		exp = time.Now().Add(-time.Second)
+	}
+	return jwt.MapClaims{"iss": iss, "sub": "123", "email": "deploy@my-project.iam.gserviceaccount.com", "email_verified": true, "aud": aud, "exp": json.Number(strconv.FormatInt(exp.Unix(), 10))}, v.err
 }
 
 type signerStub struct{ err error }
@@ -71,9 +76,7 @@ func (g *githubStub) CreateToken(_ context.Context, _ int64, _ string, p map[str
 			panic("unscoped read token")
 		}
 		g.readRepos = append([]string(nil), r...)
-		if g.readTokenErr != nil && len(r) == 2 {
-			g.events = g.events[:1]
-			g.readRepos = nil
+		if g.readTokenErr != nil {
 			return github.Token{}, g.readTokenErr
 		}
 		return github.Token{Token: "read-secret"}, nil
@@ -316,6 +319,52 @@ func TestReplayProtectionOff(t *testing.T) {
 	}
 }
 
+func TestReplayIgnoresSignatureReencoding(t *testing.T) {
+	// "AAA" and "AAB" decode to the same signature bytes; lenient base64url
+	// verification accepts both, so both must map to one replay entry.
+	s, g, _ := fixture()
+	if w := exchangeOnce(s, "eyJ.eyJ.AAA"); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	calls := len(g.events)
+	w := exchangeOnce(s, "eyJ.eyJ.AAB")
+	var res struct{ Reason string }
+	_ = json.Unmarshal(w.Body.Bytes(), &res)
+	if w.Code != 403 || res.Reason != "token_replayed" || len(g.events) != calls {
+		t.Fatal(w.Code, w.Body, g.events)
+	}
+}
+func TestReplayStoreFullRefusesWithoutEviction(t *testing.T) {
+	s, g, _ := fixture()
+	s.Config.ReplayMaxEntries = 1
+	if w := exchangeOnce(s, "first"); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	calls := len(g.events)
+	w := exchangeOnce(s, "second")
+	var res struct{ Reason string }
+	_ = json.Unmarshal(w.Body.Bytes(), &res)
+	if w.Code != 429 || res.Reason != "overloaded" || w.Header().Get("Retry-After") == "" || len(g.events) != calls {
+		t.Fatal(w.Code, w.Body, w.Header(), g.events)
+	}
+	// The live entry was not evicted to make room.
+	w = exchangeOnce(s, "first")
+	_ = json.Unmarshal(w.Body.Bytes(), &res)
+	if w.Code != 403 || res.Reason != "token_replayed" {
+		t.Fatal(w.Code, w.Body)
+	}
+}
+func TestReplayRejectsTokenExpiredBeforeConsumption(t *testing.T) {
+	s, g, _ := fixture()
+	s.Verifier = verifierStub{expired: true}
+	w := exchangeOnce(s, "t")
+	var res struct{ Reason string }
+	_ = json.Unmarshal(w.Body.Bytes(), &res)
+	if w.Code != 401 || res.Reason != "invalid_token" || slices.Contains(g.events, "caller-token") {
+		t.Fatal(w.Code, w.Body, g.events)
+	}
+}
+
 const trustPath = ".github/gsts/trusted-issuers.toml"
 
 func trustFixture(src string, err error) (*Server, *githubStub) {
@@ -374,15 +423,23 @@ func TestOrgTrustOrgScopeDoesNotDuplicateRepository(t *testing.T) {
 		t.Fatal(w.Code, w.Body, g.readRepos)
 	}
 }
-func TestOrgTrustFallsBackWhenOrgPolicyRepoInaccessible(t *testing.T) {
-	for _, status := range []int{404, 422} {
+func TestOrgTrustFailsClosedWhenOrgPolicyRepoInaccessible(t *testing.T) {
+	// A 404/422 on the two-repository read token cannot prove the org has no
+	// trust file, so there is no single-repository retry.
+	for _, tc := range []struct {
+		status, code int
+		reason       string
+	}{{404, 404, "not_found"}, {422, 502, "upstream_error"}} {
 		s, g := trustFixture(`issuers = ["https://token.actions.githubusercontent.com"]`, nil)
-		g.readTokenErr = &github.APIError{Status: status}
-		if w := exchangeOnce(s, "t"); w.Code != 200 {
-			t.Fatal(status, w.Code, w.Body)
+		g.readTokenErr = &github.APIError{Status: tc.status}
+		w := exchangeOnce(s, "t")
+		var res struct{ Reason string }
+		_ = json.Unmarshal(w.Body.Bytes(), &res)
+		if w.Code != tc.code || res.Reason != tc.reason {
+			t.Fatal(tc.status, w.Code, w.Body)
 		}
-		if !reflect.DeepEqual(g.readRepos, []string{"repo"}) || !reflect.DeepEqual(g.policyFetches, []string{"org/repo/.github/gsts/deploy.sts.toml"}) {
-			t.Fatal(g.readRepos, g.policyFetches)
+		if !reflect.DeepEqual(g.readRepos, []string{"repo", ".github"}) || len(g.policyFetches) != 0 || slices.Contains(g.events, "caller-token") {
+			t.Fatal(g.readRepos, g.policyFetches, g.events)
 		}
 	}
 }

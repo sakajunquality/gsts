@@ -139,11 +139,12 @@ Failure semantics when enabled:
 
 | Situation | Result |
 | --- | --- |
-| File not found (404), or the org policy repository is missing or not accessible to the App | Organization has not opted in; the exchange proceeds |
+| Trust file not found (404) in an accessible org policy repository | Organization has not opted in; the exchange proceeds |
+| Org policy repository missing or not installed for the App (read-token creation fails with 404/422) | 404 `not_found` / 502 `upstream_error`; fail closed |
 | Invalid TOML, unknown key, or no issuers/patterns | 403 `invalid_policy` |
 | Token issuer not allowed by the file | 403 `issuer_not_trusted` |
 | Any other fetch error | 502 `upstream_error` (rate limits still map to 429 `rate_limited`); fail closed |
 
-The temporary read token is revoked before any of these outcomes is acted on. The read token is created for the policy repository and the org policy repository together. If GitHub rejects that with 404/422 (the org policy repository does not exist or is not installed), gsts requests a token for the policy repository alone and treats the organization as not opted in; this costs one extra call only in that case. Logs record `org_trust_repository`, `org_trust_path` and `org_trust_sha256`. Validate files offline with `gsts policy validate-trust`; see [the CLI](policy-cli.md) and [`examples/policies/trusted-issuers.toml`](../examples/policies/trusted-issuers.toml).
+The temporary read token is revoked before any of these outcomes is acted on. The read token is created for the policy repository and the org policy repository together. If GitHub rejects that (the org policy repository does not exist or the App is not installed on it), the exchange fails: a status code cannot prove the organization has no trust file, so there is no single-repository retry. When this feature is enabled, every organization served by the deployment must have its org policy repository accessible to the App, even organizations that do not opt in. Logs record `org_trust_repository`, `org_trust_path` and `org_trust_sha256`. Validate files offline with `gsts policy validate-trust`; see [the CLI](policy-cli.md) and [`examples/policies/trusted-issuers.toml`](../examples/policies/trusted-issuers.toml).
 
-**Security note:** whoever can write to the org policy repository's default branch controls this file, and also controls org-scope policies. Protect that repository accordingly. Removing or renaming the file (or making the repository inaccessible to the App) disables the org restriction, because absence means "not opted in".
+**Security note:** whoever can write to the org policy repository's default branch controls this file, and also controls org-scope policies. Protect that repository accordingly. Removing or renaming the file disables the org restriction, because absence means "not opted in"; making the repository inaccessible to the App instead breaks exchanges for that organization.

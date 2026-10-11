@@ -17,12 +17,12 @@ All settings are environment variables. Invalid configuration prevents startup. 
 | `GSTS_EXCHANGE_RATE_PER_MINUTE` | `60` | Positive per-instance exchange-attempt rate (max 1,000,000), including denied attempts |
 | `GSTS_EXCHANGE_BURST` | `10` | Positive token-bucket burst capacity (max 1,000,000) |
 | `GSTS_REPLAY_PROTECTION` | `on` | `on` or `off`. When `on`, each ID token is accepted at most once per instance; a second use returns 403 `token_replayed` |
-| `GSTS_REPLAY_MAX_ENTRIES` | `100000` | Positive per-instance capacity of the replay store (max 10,000,000). Each entry is a 32-byte hash plus bookkeeping, held until the token's `exp`. When full, the entry expiring soonest is evicted rather than rejecting the request |
+| `GSTS_REPLAY_MAX_ENTRIES` | `100000` | Positive per-instance capacity of the replay store (max 10,000,000). Each entry is a 32-byte hash plus bookkeeping, held until the token's `exp`. When full, further exchanges are refused with 429 `overloaded` until entries expire; live entries are never evicted |
 | `GSTS_ALLOWED_ORGS` | All installed orgs | Comma-separated org allowlist; case-insensitive |
 | `GSTS_POLICY_PATH_PREFIX` | `.github/gsts` | Repository-relative policy directory |
 | `GSTS_POLICY_FILE_EXTENSION` | `.sts.toml` | Policy filename suffix |
 | `GSTS_ORG_POLICY_REPO` | `.github` | Org-level policy repository |
-| `GSTS_ORG_TRUST_FILE` | Disabled (empty) | Repository-relative path (e.g. `.github/gsts/trusted-issuers.toml`) of an organization [trusted-issuers file](policies.md#organization-trusted-issuers) in `GSTS_ORG_POLICY_REPO`. Validated like `GSTS_POLICY_PATH_PREFIX`. Enabling it adds one GitHub file read per exchange and widens the temporary read token to the org policy repository |
+| `GSTS_ORG_TRUST_FILE` | Disabled (empty) | Repository-relative path (e.g. `.github/gsts/trusted-issuers.toml`) of an organization [trusted-issuers file](policies.md#organization-trusted-issuers) in `GSTS_ORG_POLICY_REPO`. Validated like `GSTS_POLICY_PATH_PREFIX`. Enabling it adds one GitHub file read per exchange and widens the temporary read token to the org policy repository. The org policy repository must be accessible to the App for every served organization; otherwise exchanges fail closed |
 | `GSTS_GITHUB_API_URL` | `https://api.github.com` | HTTPS API base URL; GHES is not tested |
 | `GSTS_LOG_FORMAT` | `json` | `json` or `text`; JSON uses Cloud Logging's `severity` field |
 | `PORT` | `8080` | Listening port, on all interfaces |

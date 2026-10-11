@@ -48,7 +48,7 @@ Clients should branch on `reason`, not the human-readable `error`. Claim mismatc
 | 403 | `invalid_policy` | Invalid TOML, missing constraints, or invalid permission scope; also an invalid [organization trust file](policies.md#organization-trusted-issuers) |
 | 403 | `issuer_not_trusted` | `GSTS_ORG_TRUST_FILE` is enabled and the organization's trust file does not allow the token's issuer |
 | 404 | `not_found` | Installation or policy lookup returned 404 |
-| 429 | `overloaded` | Local concurrency or request-rate limit |
+| 429 | `overloaded` | Local concurrency or request-rate limit, or the replay store is full |
 | 429 | `rate_limited` | GitHub primary or secondary rate limit |
 | 502 | `upstream_error` | GitHub, OIDC provider, or KMS failure; includes temporary-token revocation failure |
 
@@ -60,7 +60,7 @@ GitHub 422 (for example, the App lacks a requested permission) is an upstream er
 
 ## Replay protection
 
-Unless `GSTS_REPLAY_PROTECTION=off`, each instance accepts a given ID token (identified by the SHA-256 of the raw JWT) at most once, checked after signature, timestamp and service-audience verification and before any KMS or GitHub call. A client that retries after an ambiguous failure (timeout, dropped response, 5xx) must mint a fresh ID token, because the previous one has been consumed even if the exchange failed. The store is in memory and per instance: it is not shared across Cloud Run instances or restarts, so the same token may still be accepted once by each instance. It holds at most `GSTS_REPLAY_MAX_ENTRIES` live tokens; when full, the entry expiring soonest is evicted instead of rejecting the request, so under extreme load an old token may become replayable once more before it expires.
+Unless `GSTS_REPLAY_PROTECTION=off`, each instance accepts a given ID token (identified by a SHA-256 over its decoded header, payload and signature bytes, so re-encoding the signature does not yield a new token) at most once, checked after signature, timestamp and service-audience verification and before any KMS or GitHub call. A client that retries after an ambiguous failure (timeout, dropped response, 5xx) must mint a fresh ID token, because the previous one has been consumed even if the exchange failed. The store is in memory and per instance: it is not shared across Cloud Run instances or restarts, so the same token may still be accepted once by each instance. It holds at most `GSTS_REPLAY_MAX_ENTRIES` live tokens; when full, exchanges are refused with 429 `overloaded` and `Retry-After` until entries expire, because evicting a live entry would make that token replayable. A token that expires between verification and the replay check is rejected with 401 `invalid_token`.
 
 ## Admission and retry controls
 
