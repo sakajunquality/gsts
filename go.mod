@@ -1,6 +1,6 @@
 module github.com/sakajunquality/gsts
 
-go 1.26.9
+go 1.27.2
 
 require (
 	cloud.google.com/go/kms v1.35.0

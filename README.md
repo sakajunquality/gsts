@@ -100,7 +100,7 @@ Omitting an org policy's `repositories` permits all repositories accessible to t
 
 ## Local development
 
-Requires Go 1.26.9 or later. The Terraform module requires Terraform 1.6 or later; mocked plan tests require Terraform 1.7 or later.
+Requires Go 1.27.2 or later. The Terraform module requires Terraform 1.6 or later; mocked plan tests require Terraform 1.7 or later.
 
 ```sh
 cp .env.example .env

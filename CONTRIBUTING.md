@@ -1,6 +1,6 @@
 # Contributing
 
-Use Go 1.26.9+ and Terraform 1.7+ for mocked plan tests (the module supports 1.6+). Keep authentication and authorization changes small enough to audit. Cover attacks and observable behavior, including failure and cancellation paths. Tests must not require real keys, cloud credentials, or GitHub tokens.
+Use Go 1.27.2+ and Terraform 1.7+ for mocked plan tests (the module supports 1.6+). Keep authentication and authorization changes small enough to audit. Cover attacks and observable behavior, including failure and cancellation paths. Tests must not require real keys, cloud credentials, or GitHub tokens.
 
 ```sh
 make check
