@@ -7,7 +7,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/googleapis/gax-go/v2 v2.26.2
 	github.com/pelletier/go-toml/v2 v2.4.3
-	github.com/tink-crypto/tink-go/v2 v2.8.0
+	github.com/tink-crypto/tink-go/v2 v2.9.0
 	google.golang.org/protobuf v1.36.12
 )
 

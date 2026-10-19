@@ -54,8 +54,8 @@ github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 h1:Jamvg5psRI
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
-github.com/tink-crypto/tink-go/v2 v2.8.0 h1:1zODq1bZDqOQdNPjhvwGYLDw9On7mDWPnQf+4xXlpAc=
-github.com/tink-crypto/tink-go/v2 v2.8.0/go.mod h1:aNXZeyxjQU9iqAeARRNmbESXUW6Mao1HRCCTY8B1TFM=
+github.com/tink-crypto/tink-go/v2 v2.9.0 h1:uvjgS1IYDB4zhDK0Zow8ZFB73IjzMAoSqW0JkFnvkrc=
+github.com/tink-crypto/tink-go/v2 v2.9.0/go.mod h1:aNXZeyxjQU9iqAeARRNmbESXUW6Mao1HRCCTY8B1TFM=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=
 go.opentelemetry.io/auto/sdk v1.2.1/go.mod h1:KRTj+aOaElaLi+wW1kO/DZRXwkF4C5xPbEe3ZiIhN7Y=
 go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.67.0 h1:yI1/OhfEPy7J9eoa6Sj051C7n5dvpj0QX8g4sRchg04=
