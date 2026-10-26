@@ -3,7 +3,7 @@ module github.com/sakajunquality/gsts
 go 1.27.2
 
 require (
-	cloud.google.com/go/kms v1.35.0
+	cloud.google.com/go/kms v1.36.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/googleapis/gax-go/v2 v2.26.2
 	github.com/pelletier/go-toml/v2 v2.4.3
